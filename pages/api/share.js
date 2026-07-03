@@ -35,7 +35,7 @@ export default async function handler(req, res) {
     };
 
     // 💾 Save share record
-    await kvSet(`share:${token}`, record);
+    await kvSet(`bunnyshare:share:${token}`, record);
 
     const siteUrl =
       process.env.SITE_URL || `http://${req.headers.host}`;

@@ -29,7 +29,7 @@ export default function WatchPage({ valid, reason, embedUrl, title }) {
 
 export async function getServerSideProps({ params }) {
   const { token } = params;
-  const record = await kvGet(`share:${token}`);
+  const record = await kvGet(`bunnyshare:share:${token}`);
 
   if (!record) {
     return { props: { valid: false, reason: "Link not found." } };

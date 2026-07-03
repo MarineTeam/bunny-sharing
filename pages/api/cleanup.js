@@ -4,7 +4,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const keys = await kvKeys("share:*");
+    const keys = await kvKeys("bunnyshare:share:*");
     const now = Date.now();
     let deleted = 0;
 
