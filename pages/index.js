@@ -47,6 +47,19 @@ export default function Admin() {
     }
   }
 
+  async function cleanup() {
+    if (!confirm("Delete all expired and revoked links from the database?")) return;
+    setMessage("Cleaning up...");
+    const res = await fetch("/api/cleanup", { method: "POST" });
+    const data = await res.json();
+    if (data.deleted !== undefined) {
+      setMessage(`Removed ${data.deleted} stale link${data.deleted !== 1 ? "s" : ""}`);
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
   async function revoke(token) {
     if (!confirm("Revoke this access link?")) return;
     await fetch("/api/revoke", {
@@ -116,7 +129,12 @@ export default function Admin() {
         </div>
       )}
 
-      <h2 style={{ marginTop: 40 }}>Shared Links</h2>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 40 }}>
+        <h2 style={{ margin: 0 }}>Shared Links</h2>
+        <button onClick={cleanup} style={styles.btnCleanup}>
+          🗑 Clean up expired &amp; revoked
+        </button>
+      </div>
       <table style={styles.table}>
         <thead>
           <tr>
@@ -160,5 +178,6 @@ const styles = {
   input: { width: "100%", padding: 8, border: "1px solid #ccc", borderRadius: 6 },
   modal: { border: "1px solid #ccc", borderRadius: 8, padding: 16, marginTop: 20, background: "#fafafa" },
   table: { width: "100%", borderCollapse: "collapse", marginTop: 12 },
+  btnCleanup: { background: "#6e7681", color: "white", border: 0, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 14 },
   message: { color: "#1f6feb" },
 };
