@@ -116,7 +116,20 @@ export default function Admin() {
         </div>
       )}
 
-      <h2 style={{ marginTop: 40 }}>Shared Links</h2>
+      <div style={{ marginTop: 40, display: "flex", alignItems: "center", gap: 12 }}>
+        <h2 style={{ margin: 0 }}>Shared Links</h2>
+        <button
+          onClick={async () => {
+            const res = await fetch("/api/cleanup", { method: "POST" });
+            const data = await res.json();
+            setMessage(data.ok ? `Cleaned up ${data.deleted} expired link(s)` : `Error: ${data.error}`);
+            loadAll();
+          }}
+          style={styles.btnSecondary}
+        >
+          Clean up expired
+        </button>
+      </div>
       <table style={styles.table}>
         <thead>
           <tr>
