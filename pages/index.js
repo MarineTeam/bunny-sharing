@@ -140,6 +140,7 @@ export default function Admin() {
           <tr>
             <th>Video</th>
             <th>Email</th>
+            <th>Link</th>
             <th>Status</th>
             <th>Expires</th>
             <th></th>
@@ -150,6 +151,11 @@ export default function Admin() {
             <tr key={s.token}>
               <td>{s.videoTitle}</td>
               <td>{s.email}</td>
+              <td>
+                <a href={`/watch/${s.token}`} target="_blank" rel="noreferrer" style={{ fontSize: 13, wordBreak: "break-all" }}>
+                  /watch/{s.token}
+                </a>
+              </td>
               <td>{statusOf(s)}</td>
               <td>{new Date(s.expiresAt).toLocaleString()}</td>
               <td>
