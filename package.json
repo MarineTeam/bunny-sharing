@@ -8,9 +8,13 @@
     "start": "next start"
   },
   "dependencies": {
-    "next": "14.2.5",
+    "next": "16.2.10",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "nodemailer": "6.9.13"
+    "nodemailer": "9.0.3",
+    "postcss": "^8.5.10"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
   }
 }
