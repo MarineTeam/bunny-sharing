@@ -42,6 +42,7 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 | `BUNNY_API_KEY` | Bunny Stream library API key |
 | `BUNNY_TOKEN_KEY` | Bunny token authentication key, used to sign embed URLs |
 | `BUNNY_PULL_ZONE` | Bunny Stream pull zone hostname |
+| `BUNNY_CDN_TOKEN_KEY` | Pull zone's Token Authentication key. Only needed if Token Authentication is enabled on the pull zone (thumbnails will 403 without it). Found under Library > API > "CDN zone management" > Manage > Security > Token Authentication — **not** the same key as `BUNNY_TOKEN_KEY`. |
 | `SITE_URL` | Public base URL used when building share links (falls back to the request host) |
 | `ADMIN_USER` / `ADMIN_PASS` | Credentials for Basic Auth on `/` and its API routes |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP settings for sending share emails |
