@@ -24,7 +24,8 @@ through `bunny-sharing-change-control` with new evidence.
 
 Repo state when this was written (2026-07-18): branch
 `claude/bulk-share-separate-links-auth-cblrle` at `5905bba`; `main` at
-`65dc992`. Full history is only 18 commits — read it yourself:
+`65dc992`. Full history was 18 commits at that point (anything newer is not
+chronicled here) — read it yourself:
 
 ```bash
 git log --all --oneline --graph

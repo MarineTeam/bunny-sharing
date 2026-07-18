@@ -161,7 +161,7 @@ gives the Bunny-side signatures it discriminates between.
 ## Provenance and maintenance
 
 Facts verified against the repo on 2026-07-18 (branch
-claude/bulk-share-separate-links-auth, 5905bba). Re-verify before trusting:
+claude/bulk-share-separate-links-auth-cblrle, 5905bba). Re-verify before trusting:
 
 - Signing math and dashboard-location comments: `grep -n "sha256\|digest\|Security" lib/bunny.js`
 - List endpoint and 100-item ceiling: `grep -n "itemsPerPage" lib/bunny.js`
