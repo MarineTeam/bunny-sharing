@@ -307,11 +307,26 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `firstViewedAt` | number (optional) | Unix ms of first authorized render; additive, may be absent |
 | `lastViewedAt` | number (optional) | Unix ms of latest authorized render; additive, may be absent |
 
+| `playCount` | number (optional) | Real playback starts reported by the player; additive |
+| `firstPlayedAt` / `lastPlayedAt` | number (optional) | Unix ms; additive |
+| `maxProgressPct` | number (optional) | Furthest playback progress 0-100, monotonic (server takes max) |
+| `completedAt` | number (optional) | Unix ms of first `ended` event; additive |
+
 View fields are written by `pages/watch/[token].js` only on the AUTHORIZED
 branch (valid cookie grant → embed render) — never for the email form or a
-magic-link exchange. Last-writer-wins on concurrent views (accepted at this
-scale). This is the "track who viewed" feature: one record per recipient ×
-video means views are attributable per person.
+magic-link exchange. Playback fields are written by `/api/watch/track`
+(public route) from Player.js events the Bunny embed emits via postMessage;
+the client listener lives in the watch page's `Player` component. Track
+calls must carry a **tracking grant** — a normal token-bound grant, capped
+at min(6 h, share expiry), signed during the authorized SSR render and
+passed as a page prop (the gate cookie is Path-scoped + HttpOnly, so client
+JS cannot present it; the tracking grant is the sanctioned bridge). This
+means playback counters cannot be inflated without having passed the email
+gate. Last-writer-wins on concurrent updates (accepted at this scale).
+One record per recipient × video means views AND playback are attributable
+per person. Note: Player.js event delivery from the Bunny embed is
+code-complete but not yet observed live (campaign P3 item); if events never
+arrive, view tracking still works and playback columns simply stay empty.
 
 Auxiliary key: `gatethrottle:<token>` — value `1`, Upstash `EX=30`
 (`pages/api/watch/request-link.js:43-48`). Ephemeral; not part of the

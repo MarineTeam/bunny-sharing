@@ -120,7 +120,10 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    array without blocking the others (their records exist — resend or
    revoke). Invariant: bulk never reuses a token across pairs. Views are
    tracked per record (`viewCount`/`lastViewedAt`, shown in the shares
-   table's Views column) — so with per-recipient links you can see who
+   table's Views column), and real playback separately
+   (`playCount`/`maxProgressPct`/`completedAt` via `/api/watch/track`,
+   shown in the Watched column: `—` / `started` / `NN%` / `100% ✓`) — so
+   with per-recipient links you can see who opened AND who actually
    watched what.
 5. **Shares table** — rendered from `GET /api/shares`
    (`pages/api/shares.js`: `KEYS bunnyshare:*`, fetch each, sort by

@@ -228,6 +228,7 @@ export default function Admin() {
             <th>Link</th>
             <th>Status</th>
             <th>Views</th>
+            <th>Watched</th>
             <th>Expires</th>
             <th></th>
           </tr>
@@ -245,6 +246,9 @@ export default function Admin() {
               <td>{statusOf(s)}</td>
               <td title={s.lastViewedAt ? `Last viewed ${new Date(s.lastViewedAt).toLocaleString()}` : "Never viewed"}>
                 {s.viewCount ? `${s.viewCount}×` : "—"}
+              </td>
+              <td title={s.lastPlayedAt ? `Last played ${new Date(s.lastPlayedAt).toLocaleString()}${s.playCount ? `, ${s.playCount} play${s.playCount !== 1 ? "s" : ""}` : ""}` : "Never played"}>
+                {s.completedAt ? "100% ✓" : s.maxProgressPct ? `${s.maxProgressPct}%` : s.playCount ? "started" : "—"}
               </td>
               <td>{new Date(s.expiresAt).toLocaleString()}</td>
               <td>

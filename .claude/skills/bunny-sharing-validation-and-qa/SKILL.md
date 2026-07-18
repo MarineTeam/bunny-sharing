@@ -62,6 +62,7 @@ must be literally observed, not assumed.
 - [ ] Each link gates independently (email verify on link 1 does not unlock link 2 — cookie is Path-scoped), and recipient A's email does NOT pass the gate on recipient B's link.
 - [ ] Revoke ONE pair (e.g. recipient A × video 2) → A's other link and both of B's links still work.
 - [ ] View tracking: watch one link → its shares-table row shows Views `1×` (hover shows last-viewed time); the unwatched rows show `—`. Reload the watch page → count increments.
+- [ ] Playback tracking (needs a real Bunny video): press play → row's Watched column shows `started`; scrub past 25/50/75% → shows the milestone %; play to the end → `100% ✓`. Opening the page WITHOUT pressing play must leave Watched at `—` while Views increments — that separation is the feature's point.
 
 ### Expiry
 - [ ] Create a share with hours = a small fraction (e.g. 0.02 ≈ 72 s — `hours` is multiplied by 3600·1000; verify the record's expiresAt via kv-inspect).

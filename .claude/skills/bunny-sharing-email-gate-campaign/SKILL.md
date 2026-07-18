@@ -137,6 +137,15 @@ security-sensitive class), re-run P2 from scratch.
 3. Verify email on link 1 → link 2 still shows its own email form (Path-scoped
    cookie does not leak).
 4. Revoke share 2 → shares 1 and 3 still play; share 2 shows revoked page.
+4a. Playback events (first live observation — Player.js compatibility of the
+   Bunny embed is code-complete but UNVERIFIED live as of 2026-07-18): play a
+   video, watch the Network tab for POSTs to `/api/watch/track` (expect
+   `{"ok":true}` 200s on play and at 25/50/75% and on ended), then confirm
+   the shares table's Watched column advances (`started` → `NN%` → `100% ✓`).
+   If NO track calls appear at all → the embed's postMessage events aren't
+   arriving; debug the Player.js handshake in the watch page's `Player`
+   component before concluding anything else. Views column must increment
+   regardless — the two trackers are independent.
 4b. Multi-recipient: repeat with 2 videos × 2 recipients (both inboxes yours).
    Expect 2 emails, 4 distinct tokens total, each email containing only its
    recipient's links; recipient A's address fails the gate on B's links
