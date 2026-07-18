@@ -1,0 +1,63 @@
+import { kvGet, kvSetEx } from "../../../lib/kv";
+import { signGrant, normalizeEmail } from "../../../lib/gate";
+import { sendMagicLinkEmail } from "../../../lib/mailer";
+import { baseUrl } from "../../../lib/shares";
+
+// How long the emailed magic link stays valid before the recipient must
+// request a fresh one.
+const MAGIC_LINK_TTL_MS = 15 * 60 * 1000; // 15 minutes
+// Minimum gap between magic-link emails for the same share, to prevent abuse.
+const THROTTLE_SECONDS = 30;
+
+// Public endpoint (excluded from admin Basic Auth in middleware.js).
+// Given a share token and a typed email, emails a magic link ONLY if the email
+// matches the recipient the share was created for. The response is intentionally
+// identical whether or not the email matched, so the page can't be used to probe
+// which address a link belongs to.
+export default async function handler(req, res) {
+  if (req.method !== "POST") return res.status(405).end();
+
+  const genericOk = () =>
+    res.status(200).json({
+      ok: true,
+      message: "If that email matches this link, we've sent a sign-in link to it.",
+    });
+
+  try {
+    const { token, email } = req.body || {};
+    if (!token || !email) {
+      return res.status(400).json({ error: "token and email are required" });
+    }
+
+    const record = await kvGet(`bunnyshare:${token}`);
+    if (!record || record.revoked || Date.now() > record.expiresAt) {
+      // Don't distinguish invalid links from non-matching emails.
+      return genericOk();
+    }
+
+    if (normalizeEmail(email) !== normalizeEmail(record.email)) {
+      return genericOk();
+    }
+
+    // Best-effort throttle so a matching recipient can't be email-bombed.
+    const throttleKey = `gatethrottle:${token}`;
+    const recentlySent = await kvGet(throttleKey);
+    if (recentlySent) {
+      return genericOk();
+    }
+    await kvSetEx(throttleKey, 1, THROTTLE_SECONDS);
+
+    const grant = signGrant({
+      token,
+      email: record.email,
+      expiresAt: Date.now() + MAGIC_LINK_TTL_MS,
+    });
+    const link = `${baseUrl(req)}/watch/${token}?grant=${encodeURIComponent(grant)}`;
+
+    await sendMagicLinkEmail({ to: record.email, videoTitle: record.videoTitle, link });
+
+    return genericOk();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
