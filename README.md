@@ -14,7 +14,7 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 
 - A [Bunny.net](https://bunny.net/) account with a Stream library and pull zone
 - An [Upstash](https://upstash.com/) Redis database (REST API), or the equivalent from the Vercel Storage tab
-- An SMTP provider for sending share emails (Brevo, SMTP2GO, Gmail app password, etc.)
+- An email provider for sending share emails — [Resend](https://resend.com/) (via its API, recommended) or any SMTP provider (Brevo, SMTP2GO, Gmail app password, etc.)
 
 ## Getting started
 
@@ -46,7 +46,8 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 | `SITE_URL` | Public base URL used when building share links (falls back to the request host) |
 | `ADMIN_USER` / `ADMIN_PASS` | Credentials for Basic Auth on `/` and its API routes |
 | `GATE_SECRET` | Long random secret used to sign the email-gate magic links and viewer cookies (e.g. `openssl rand -hex 32`). Required for `/watch` pages. |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP settings for sending emails. Works with any SMTP provider — e.g. Resend (`smtp.resend.com`, user `resend`, pass = API key), Brevo, SMTP2GO, or a Gmail app password. |
+| `RESEND_API_KEY` / `RESEND_FROM` | Preferred email delivery: when `RESEND_API_KEY` is set, emails are sent via the [Resend](https://resend.com/) HTTP API. `RESEND_FROM` is a verified sender on your Resend domain. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | Fallback SMTP settings, used only when `RESEND_API_KEY` is not set. Works with any SMTP provider (Brevo, SMTP2GO, Gmail app password, etc.). |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Upstash Redis REST API credentials for storing share records |
 
 ## API routes
