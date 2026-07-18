@@ -5,8 +5,8 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 ## How it works
 
 - The admin page (`/`) is protected with HTTP Basic Auth and lists videos from your Bunny Stream library.
-- From there you generate a share: pick a video, enter a recipient email and an expiry window, and the app emails them a link like `/watch/<token>`.
-- The `/watch/[token]` page is public (not behind Basic Auth) so recipients can open it directly. It checks the token against storage and only renders the video player if the link hasn't been revoked or expired.
+- From there you generate a share: pick a video, enter a recipient email and an expiry window, and the app emails them a link like `/watch/<token>`. You can also **select multiple videos and bulk-share them at once** — each video gets its own separate, independently revocable link, all delivered in one email.
+- The `/watch/[token]` page is public (not behind Basic Auth) so recipients can open it directly. It's **email-gated**: the recipient must enter the address the link was shared with, and only if it matches does the app email them a one-time "magic link". Clicking that link sets a signed, link-scoped cookie and plays the video. Possessing the share URL alone is not enough — you also have to control the inbox it was sent to. Links that are revoked or expired never render.
 - Share records (token, video, recipient, expiry, revoked flag) are stored in Upstash Redis via the REST API.
 - Expired/revoked shares can be purged with a cleanup endpoint, suitable for a scheduled job.
 
@@ -45,7 +45,8 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 | `BUNNY_CDN_TOKEN_KEY` | Pull zone's Token Authentication key. Only needed if Token Authentication is enabled on the pull zone (thumbnails will 403 without it). Found under Library > API > "CDN zone management" > Manage > Security > Token Authentication — **not** the same key as `BUNNY_TOKEN_KEY`. |
 | `SITE_URL` | Public base URL used when building share links (falls back to the request host) |
 | `ADMIN_USER` / `ADMIN_PASS` | Credentials for Basic Auth on `/` and its API routes |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP settings for sending share emails |
+| `GATE_SECRET` | Long random secret used to sign the email-gate magic links and viewer cookies (e.g. `openssl rand -hex 32`). Required for `/watch` pages. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` | SMTP settings for sending emails. Works with any SMTP provider — e.g. Resend (`smtp.resend.com`, user `resend`, pass = API key), Brevo, SMTP2GO, or a Gmail app password. |
 | `KV_REST_API_URL` / `KV_REST_API_TOKEN` | Upstash Redis REST API credentials for storing share records |
 
 ## API routes
@@ -54,9 +55,11 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 | --- | --- | --- |
 | `/api/videos` | GET | List videos from the Bunny library |
 | `/api/share` | POST | Create a share link and email it to a recipient |
+| `/api/share-bulk` | POST | Create a separate link per selected video and email them all to one recipient |
 | `/api/shares` | GET | List all share records (for the admin table) |
 | `/api/revoke` | POST | Revoke a share by token |
 | `/api/cleanup` | POST | Delete expired or revoked share records |
+| `/api/watch/request-link` | POST | Public: verify a recipient's email against a share and email them a one-time magic link (excluded from admin Basic Auth) |
 
 All routes except `/watch/[token]` are protected by the Basic Auth middleware.
 

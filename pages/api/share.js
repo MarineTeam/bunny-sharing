@@ -1,5 +1,4 @@
-import crypto from "crypto";
-import { kvSet } from "../../lib/kv";
+import { createShareRecord, baseUrl } from "../../lib/shares";
 import { sendShareEmail } from "../../lib/mailer";
 
 export default async function handler(req, res) {
@@ -11,29 +10,19 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "videoId and email are required" });
     }
 
-    const token = crypto.randomBytes(16).toString("hex");
-    const expiresAt = Date.now() + (Number(hours) || 72) * 3600 * 1000;
-
-    const record = {
-      token,
+    const { record, link } = await createShareRecord({
       videoId,
-      videoTitle: videoTitle || videoId,
+      videoTitle,
       email,
-      createdAt: Date.now(),
-      expiresAt,
-      revoked: false,
-    };
-
-    await kvSet(`bunnyshare:${token}`, record);
-
-    const siteUrl = process.env.SITE_URL || `https://${req.headers.host}`;
-    const link = `${siteUrl}/watch/${token}`;
+      hours,
+      siteUrl: baseUrl(req),
+    });
 
     await sendShareEmail({
       to: email,
       videoTitle: record.videoTitle,
       link,
-      expiresAt,
+      expiresAt: record.expiresAt,
     });
 
     res.status(200).json({ ok: true, link });

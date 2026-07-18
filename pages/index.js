@@ -8,6 +8,19 @@ export default function Admin() {
   const [email, setEmail] = useState("");
   const [hours, setHours] = useState(72);
   const [message, setMessage] = useState("");
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkEmail, setBulkEmail] = useState("");
+  const [bulkHours, setBulkHours] = useState(72);
+  const [bulkSending, setBulkSending] = useState(false);
+
+  function toggleSelected(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   async function loadAll() {
     setLoading(true);
@@ -41,6 +54,32 @@ export default function Admin() {
       setMessage(`Sent to ${email}`);
       setShareForVideo(null);
       setEmail("");
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
+  async function submitBulk() {
+    const chosen = videos.filter((v) => selected.has(v.id));
+    if (chosen.length === 0 || !bulkEmail) return;
+    setBulkSending(true);
+    setMessage("Sending...");
+    const res = await fetch("/api/share-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        videos: chosen.map((v) => ({ id: v.id, title: v.title })),
+        email: bulkEmail,
+        hours: bulkHours,
+      }),
+    });
+    const data = await res.json();
+    setBulkSending(false);
+    if (data.ok) {
+      setMessage(`Created ${data.count} separate link${data.count !== 1 ? "s" : ""} and emailed ${bulkEmail}`);
+      setSelected(new Set());
+      setBulkEmail("");
       loadAll();
     } else {
       setMessage(`Error: ${data.error}`);
@@ -83,11 +122,51 @@ export default function Admin() {
       <h1>Video Library</h1>
       {message && <p style={styles.message}>{message}</p>}
 
+      {selected.size > 0 && (
+        <div style={styles.bulkBar}>
+          <strong>{selected.size} selected</strong>
+          <input
+            type="email"
+            placeholder="recipient@email.com"
+            value={bulkEmail}
+            onChange={(e) => setBulkEmail(e.target.value)}
+            style={{ ...styles.input, flex: "1 1 220px", width: "auto", marginTop: 0 }}
+          />
+          <label style={{ whiteSpace: "nowrap" }}>
+            Valid for (hrs):{" "}
+            <input
+              type="number"
+              value={bulkHours}
+              onChange={(e) => setBulkHours(e.target.value)}
+              style={{ width: 70 }}
+            />
+          </label>
+          <button
+            onClick={submitBulk}
+            disabled={!bulkEmail || bulkSending}
+            style={styles.btn}
+          >
+            {bulkSending ? "Sending..." : `Send ${selected.size} separate link${selected.size !== 1 ? "s" : ""}`}
+          </button>
+          <button onClick={() => setSelected(new Set())} style={styles.btnSecondary}>
+            Clear
+          </button>
+        </div>
+      )}
+
       <div style={styles.grid}>
         {videos.map((v) => (
-          <div key={v.id} style={styles.card}>
+          <div key={v.id} style={{ ...styles.card, outline: selected.has(v.id) ? "2px solid #1f6feb" : "none" }}>
             {v.thumbnail && <img src={v.thumbnail} alt={v.title} style={styles.thumb} />}
             <div style={{ padding: 10 }}>
+              <label style={styles.selectLabel}>
+                <input
+                  type="checkbox"
+                  checked={selected.has(v.id)}
+                  onChange={() => toggleSelected(v.id)}
+                />{" "}
+                Select
+              </label>
               <strong>{v.title}</strong>
               <div>
                 <button onClick={() => setShareForVideo(v)} style={styles.btn}>
@@ -186,4 +265,6 @@ const styles = {
   table: { width: "100%", borderCollapse: "collapse", marginTop: 12 },
   btnCleanup: { background: "#6e7681", color: "white", border: 0, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 14 },
   message: { color: "#1f6feb" },
+  bulkBar: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, marginBottom: 16, border: "1px solid #1f6feb", background: "#eef4ff", borderRadius: 8 },
+  selectLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4, cursor: "pointer" },
 };
