@@ -183,15 +183,19 @@ suggestions; they are the reasons the system is safe and simple.
   — mixing the two schemes was a real incident (`65dc992`); the signing math
   lives in bunny-stream-reference.
 
-### 2.6 Bulk = N independent records; no bundle entity
+### 2.6 Bulk = M×N independent records; no bundle entity
 
-- **Decision**: `/api/share-bulk` loops `createShareRecord` once per video —
-  N videos → N tokens → N records → N links — and sends one consolidated
-  email listing them all (`pages/api/share-bulk.js:21-42`). Falsy ids are
-  skipped; all-invalid input is a 400.
-- **Why**: Independent revocation per video, and zero new schema. The
-  **only** grouping that exists is the email itself; there is no "bundle"
-  key, id, or record anywhere in KV.
+- **Decision**: `/api/share-bulk` accepts multiple recipients (`emails`
+  array; legacy single `email` still accepted) and loops `createShareRecord`
+  once per recipient × video pair — M recipients × N videos → M×N tokens →
+  M×N records. Each recipient gets ONE consolidated email listing only their
+  own links (`pages/api/share-bulk.js`). Falsy video ids are skipped;
+  all-invalid input is a 400; a per-recipient email failure is reported in
+  the response (`failures`) without failing other recipients.
+- **Why**: Independent revocation per person per video, per-person view
+  tracking (section 5.1 view fields), and zero new schema. The **only**
+  grouping that exists is each email itself; there is no "bundle" key, id,
+  or record anywhere in KV.
 - **What breaks**: Introducing a bundle entity adds a second source of truth
   and a migration risk to `bunnyshare:*` (invariant 1). Any feature that
   assumes shares created together can be found together will find nothing —
@@ -258,7 +262,7 @@ from the repo root to confirm it still holds.
 | 5 | `GATE_SECRET` has no default; the gate throws if unset (`lib/gate.js:14-22`) | `grep -n "throw" lib/gate.js` — inside `secret()` |
 | 6 | Grant verification uses `crypto.timingSafeEqual`; grants are token-bound and expiring (`lib/gate.js:55,60-61`) | `grep -n "timingSafeEqual\|payload.t !== token\|payload.x" lib/gate.js` |
 | 7 | Middleware matcher keeps `/api/watch/*` public and everything else on the admin surface behind Basic Auth; `/watch/*` stays out of the matcher | `grep -n "matcher" middleware.js` — exactly `["/", "/api/((?!watch/).*)"]` |
-| 8 | Every share has its own token; bulk N videos → N records → N independently revocable links | `grep -n "createShareRecord" pages/api/share-bulk.js` — inside the per-video loop |
+| 8 | Every share has its own token; bulk M recipients × N videos → M×N records, each independently revocable | `grep -n "createShareRecord" pages/api/share-bulk.js` — inside the per-recipient, per-video loops |
 | 9 | Revoke flips `revoked: true`; only cleanup deletes, and only revoked-or-expired records | `grep -n "kvDel" pages/api/*.js` — only `cleanup.js` matches |
 
 ## 4. Known weak points — honest register
@@ -299,6 +303,15 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `createdAt` | number | Unix epoch **milliseconds** |
 | `expiresAt` | number | Unix epoch **milliseconds**: `Date.now() + (Number(hours) || 72) * 3600 * 1000` — default 72 h |
 | `revoked` | boolean | `false` at creation; flipped to `true` by `/api/revoke`; never deleted except by `/api/cleanup` |
+| `viewCount` | number (optional) | Authorized page renders. ADDITIVE (added after 5905bba): absent on older records — read as `record.viewCount \|\| 0`, never assume present |
+| `firstViewedAt` | number (optional) | Unix ms of first authorized render; additive, may be absent |
+| `lastViewedAt` | number (optional) | Unix ms of latest authorized render; additive, may be absent |
+
+View fields are written by `pages/watch/[token].js` only on the AUTHORIZED
+branch (valid cookie grant → embed render) — never for the email form or a
+magic-link exchange. Last-writer-wins on concurrent views (accepted at this
+scale). This is the "track who viewed" feature: one record per recipient ×
+video means views are attributable per person.
 
 Auxiliary key: `gatethrottle:<token>` — value `1`, Upstash `EX=30`
 (`pages/api/watch/request-link.js:43-48`). Ephemeral; not part of the

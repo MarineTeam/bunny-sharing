@@ -62,7 +62,8 @@ export default function Admin() {
 
   async function submitBulk() {
     const chosen = videos.filter((v) => selected.has(v.id));
-    if (chosen.length === 0 || !bulkEmail) return;
+    const emails = bulkEmail.split(/[,;\s]+/).map((e) => e.trim()).filter((e) => e.includes("@"));
+    if (chosen.length === 0 || emails.length === 0) return;
     setBulkSending(true);
     setMessage("Sending...");
     const res = await fetch("/api/share-bulk", {
@@ -70,14 +71,19 @@ export default function Admin() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         videos: chosen.map((v) => ({ id: v.id, title: v.title })),
-        email: bulkEmail,
+        emails,
         hours: bulkHours,
       }),
     });
     const data = await res.json();
     setBulkSending(false);
     if (data.ok) {
-      setMessage(`Created ${data.count} separate link${data.count !== 1 ? "s" : ""} and emailed ${bulkEmail}`);
+      const sentTo = data.recipients.map((r) => r.email).join(", ");
+      let msg = `Created ${data.count} separate link${data.count !== 1 ? "s" : ""}; emailed ${sentTo}`;
+      if (data.failures) {
+        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (links created, email not sent)`;
+      }
+      setMessage(msg);
       setSelected(new Set());
       setBulkEmail("");
       loadAll();
@@ -126,8 +132,8 @@ export default function Admin() {
         <div style={styles.bulkBar}>
           <strong>{selected.size} selected</strong>
           <input
-            type="email"
-            placeholder="recipient@email.com"
+            type="text"
+            placeholder="recipient emails, comma-separated"
             value={bulkEmail}
             onChange={(e) => setBulkEmail(e.target.value)}
             style={{ ...styles.input, flex: "1 1 220px", width: "auto", marginTop: 0 }}
@@ -146,7 +152,7 @@ export default function Admin() {
             disabled={!bulkEmail || bulkSending}
             style={styles.btn}
           >
-            {bulkSending ? "Sending..." : `Send ${selected.size} separate link${selected.size !== 1 ? "s" : ""}`}
+            {bulkSending ? "Sending..." : `Send ${selected.size} video${selected.size !== 1 ? "s" : ""} (separate links per recipient)`}
           </button>
           <button onClick={() => setSelected(new Set())} style={styles.btnSecondary}>
             Clear
@@ -221,6 +227,7 @@ export default function Admin() {
             <th>Email</th>
             <th>Link</th>
             <th>Status</th>
+            <th>Views</th>
             <th>Expires</th>
             <th></th>
           </tr>
@@ -236,6 +243,9 @@ export default function Admin() {
                 </a>
               </td>
               <td>{statusOf(s)}</td>
+              <td title={s.lastViewedAt ? `Last viewed ${new Date(s.lastViewedAt).toLocaleString()}` : "Never viewed"}>
+                {s.viewCount ? `${s.viewCount}×` : "—"}
+              </td>
               <td>{new Date(s.expiresAt).toLocaleString()}</td>
               <td>
                 {statusOf(s) === "Active" && (

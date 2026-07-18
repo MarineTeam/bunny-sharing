@@ -108,10 +108,12 @@ to require it, stop and escalate to the maintainer.
    `/watch/*`, every live link breaks behind a 401 (a prime-directive violation);
    if it stops covering the rest of `/api`, the whole admin surface is public.
 
-8. **Bulk share = one token/record/link PER video** (pages/api/share-bulk.js
-   loops `createShareRecord` per video; lib/shares.js generates a fresh random
-   token per call). *Why:* independent revocation and expiry per video —
-   deliberate design of the bulk feature (`7e2c016`). Never "optimize" into one
+8. **Bulk share = one token/record/link PER recipient × video pair**
+   (pages/api/share-bulk.js loops `createShareRecord` per recipient per
+   video; lib/shares.js generates a fresh random token per call). *Why:*
+   independent revocation and per-person view tracking — deliberate design
+   of the bulk feature (`7e2c016`, extended to multi-recipient + view
+   tracking after `c43b96f`). Never "optimize" into one
    shared token.
 
 9. **Revoke = flag flip, never delete** (pages/api/revoke.js:12-13 sets

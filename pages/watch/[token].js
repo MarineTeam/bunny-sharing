@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { kvGet } from "../../lib/kv";
+import { kvGet, kvSet } from "../../lib/kv";
 import { generateEmbedUrl } from "../../lib/bunny";
 import { signGrant, verifyGrant } from "../../lib/gate";
 
@@ -168,6 +168,18 @@ export async function getServerSideProps({ params, query, req, res }) {
   const cookies = parseCookies(req.headers.cookie);
   const existing = verifyGrant(cookies[cookieName(token)], { token });
   if (existing) {
+    // View tracking: additive fields only, so records created before this
+    // feature keep working untouched. Counted per authorized page render —
+    // never for the email form. Last-writer-wins on concurrent views is
+    // acceptable at this scale.
+    const now = Date.now();
+    await kvSet(`bunnyshare:${token}`, {
+      ...record,
+      viewCount: (record.viewCount || 0) + 1,
+      firstViewedAt: record.firstViewedAt || now,
+      lastViewedAt: now,
+    });
+
     const embedUrl = generateEmbedUrl(record.videoId, 3600);
     return { props: { status: "authorized", embedUrl, title: record.videoTitle } };
   }

@@ -137,6 +137,11 @@ security-sensitive class), re-run P2 from scratch.
 3. Verify email on link 1 → link 2 still shows its own email form (Path-scoped
    cookie does not leak).
 4. Revoke share 2 → shares 1 and 3 still play; share 2 shows revoked page.
+4b. Multi-recipient: repeat with 2 videos × 2 recipients (both inboxes yours).
+   Expect 2 emails, 4 distinct tokens total, each email containing only its
+   recipient's links; recipient A's address fails the gate on B's links
+   (uniform 200, no magic link — inbox check); watching one link sets its
+   Views column to `1×` while the others stay `—` (per-person tracking).
 5. kv-inspect: 3 records with distinct tokens, same email, same expiry.
 
 GATE P3 — all five observed. Failure of #2 falsifies the feature's core claim:

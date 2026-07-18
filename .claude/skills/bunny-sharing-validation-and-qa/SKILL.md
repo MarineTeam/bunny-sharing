@@ -55,12 +55,13 @@ must be literally observed, not assumed.
 - [ ] Reload → still plays (cookie grant).
 - [ ] Revoke in admin UI → reload → "Access to this video has been revoked."
 
-### Bulk share (the feature's core claim: separate links)
-- [ ] Select ≥3 videos, one recipient, send.
-- [ ] ONE email arrives listing all videos.
-- [ ] Extract the links; assert all tokens DISTINCT — e.g. paste the links into a file and run `grep -o 'watch/[a-f0-9]*' links.txt | sort | uniq -d` (must print nothing).
-- [ ] Each link gates independently (email verify on link 1 does not unlock link 2 — cookie is Path-scoped).
-- [ ] Revoke link 2 only → links 1 and 3 still work.
+### Bulk share (the feature's core claims: separate links per recipient × video, per-person tracking)
+- [ ] Select ≥2 videos, TWO recipients (comma-separated, both inboxes you control), send.
+- [ ] EACH recipient gets ONE email listing only their own links (2 emails total; recipient A's links absent from B's email).
+- [ ] Extract ALL links from both emails; assert all tokens DISTINCT — paste into a file and run `grep -o 'watch/[a-f0-9]*' links.txt | sort | uniq -d` (must print nothing). With 2×2 that's 4 distinct tokens.
+- [ ] Each link gates independently (email verify on link 1 does not unlock link 2 — cookie is Path-scoped), and recipient A's email does NOT pass the gate on recipient B's link.
+- [ ] Revoke ONE pair (e.g. recipient A × video 2) → A's other link and both of B's links still work.
+- [ ] View tracking: watch one link → its shares-table row shows Views `1×` (hover shows last-viewed time); the unwatched rows show `—`. Reload the watch page → count increments.
 
 ### Expiry
 - [ ] Create a share with hours = a small fraction (e.g. 0.02 ≈ 72 s — `hours` is multiplied by 3600·1000; verify the record's expiresAt via kv-inspect).

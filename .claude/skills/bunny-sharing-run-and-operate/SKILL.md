@@ -108,14 +108,20 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    sent — an email failure still leaves a live share record (known weak
    point).
 4. **Bulk share** — tick Select checkboxes on 2+ cards → a bulk bar appears
-   with ONE email field and ONE hours field → "Send N separate links" →
-   `POST /api/share-bulk` with `{videos: [{id, title}, ...], email, hours}`.
-   Server side (`pages/api/share-bulk.js`): loops over the videos, calls
-   `createShareRecord` once per video (skipping entries with falsy `id`;
-   400 if none valid) → **N distinct tokens, N independently revocable
-   records** — then sends ONE consolidated email listing all N links
-   (`sendBulkShareEmail`). Invariant: bulk never reuses a token across
-   videos.
+   with an emails field (comma/space/semicolon-separated, one or more) and
+   ONE hours field → `POST /api/share-bulk` with
+   `{videos: [{id, title}, ...], emails: [..], hours}` (legacy single
+   `email` string still accepted). Server side (`pages/api/share-bulk.js`):
+   loops recipients × videos, calls `createShareRecord` once per pair
+   (skipping entries with falsy `id`; 400 if none valid) → **M×N distinct
+   tokens, each independently revocable** — then sends each recipient ONE
+   consolidated email listing only their own links (`sendBulkShareEmail`).
+   A failed send for one recipient is reported in the response `failures`
+   array without blocking the others (their records exist — resend or
+   revoke). Invariant: bulk never reuses a token across pairs. Views are
+   tracked per record (`viewCount`/`lastViewedAt`, shown in the shares
+   table's Views column) — so with per-recipient links you can see who
+   watched what.
 5. **Shares table** — rendered from `GET /api/shares`
    (`pages/api/shares.js`: `KEYS bunnyshare:*`, fetch each, sort by
    `createdAt` desc). Status is NOT stored; it is derived client-side by
