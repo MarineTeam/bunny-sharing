@@ -299,7 +299,7 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `token` | string | 32 lowercase hex chars — `crypto.randomBytes(16).toString("hex")` |
 | `videoId` | string | Bunny Stream video GUID |
 | `videoTitle` | string | Display title; falls back to `videoId` if absent |
-| `email` | string | Recipient email **as entered** (NOT normalized at write time; normalization happens at compare time via `normalizeEmail`, `pages/api/watch/request-link.js:38`) |
+| `email` | string | Exactly ONE recipient address per record — `parseEmails` (lib/shares.js) splits comma/semicolon/whitespace-joined input at the API boundary and both share endpoints fan out one record per address. NOT normalized at write time; the gate normalizes at compare time and (for legacy records that stored a combined string — see failure-archaeology Episode 9) matches the typed address against any address found in the stored string |
 | `createdAt` | number | Unix epoch **milliseconds** |
 | `expiresAt` | number | Unix epoch **milliseconds**: `Date.now() + (Number(hours) || 72) * 3600 * 1000` — default 72 h |
 | `revoked` | boolean | `false` at creation; flipped to `true` by `/api/revoke`; never deleted except by `/api/cleanup` |

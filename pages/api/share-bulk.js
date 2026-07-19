@@ -1,4 +1,4 @@
-import { createShareRecord, baseUrl } from "../../lib/shares";
+import { createShareRecord, baseUrl, parseEmails } from "../../lib/shares";
 import { sendBulkShareEmail } from "../../lib/mailer";
 
 // Creates a separate share (distinct token + link) for every recipient x video
@@ -10,12 +10,10 @@ export default async function handler(req, res) {
 
   try {
     const { videos, emails, email, hours } = req.body;
-    const rawList = Array.isArray(emails) ? emails : email ? [email] : [];
-    const recipients = [
-      ...new Set(
-        rawList.map((e) => String(e).trim()).filter((e) => e.includes("@"))
-      ),
-    ];
+    // parseEmails splits comma/semicolon/whitespace-joined strings in BOTH
+    // shapes — a legacy client sending email:"a@b.c, d@e.f" must fan out to
+    // two recipients, never become one record with a combined email string.
+    const recipients = parseEmails(emails ?? email);
 
     if (!Array.isArray(videos) || videos.length === 0 || recipients.length === 0) {
       return res

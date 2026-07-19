@@ -289,7 +289,7 @@ the files above at current HEAD.
 
 **Status: SETTLED** (Auth0/Clerk rejection; type-email-then-magic-link flow).
 OTP remains a labeled CANDIDATE. The gate itself is functionally complete but
-**unproven in production** — that is Episode 9 / the campaign skill.
+**unproven in production** — that is Episode 10 / the campaign skill.
 
 ---
 
@@ -324,7 +324,49 @@ through `deliver()` — never instantiate a transporter in a sender again.
 
 ---
 
-## Episode 9 — Open/unsettled register
+## Episode 9 — The comma-string recipient lockout
+
+**Symptom/Trigger.** User report (2026-07-19): "magic link doesn't send if it
+was bulk shared to multiple emails, and each email share isn't getting
+individual links." Both recipients of a bulk share received the SAME links,
+and neither could ever get a magic link — the gate returned its uniform 200
+and sent nothing.
+
+**Root cause.** Comma-separated addresses typed into a single `email` field
+were stored VERBATIM into one share record per video
+(`email: "a@b.c, d@e.f"`). Two failures cascade from that one bad write:
+(1) email providers treat a comma-joined string as multiple recipients, so
+every address received the same email with the same links — no per-person
+records existed; (2) the gate compared the typed single address against the
+stored combined string, never matched, and anti-enumeration made the failure
+silent. The first multi-recipient server code (`c115034`) fixed the `emails`
+array path but left the legacy single-`email` path unsplit — so a stale
+client bundle sending the old shape kept reproducing the bug.
+
+**Fix** (2026-07-19): `parseEmails()` in lib/shares.js is now the single
+choke point turning user input into a recipient list — it flattens arrays
+AND splits commas/semicolons/whitespace inside every element; both
+`/api/share` and `/api/share-bulk` fan out one record per parsed address
+(single share included: it had the same latent bug). Defense at the gate
+too: `request-link` splits a record's stored email and matches the typed
+address against ANY of them, sending the magic link to the TYPED address
+only — so legacy combined-string records already in KV became usable again
+without touching them (never-break-live-links applies to broken data too).
+
+**Evidence.** The commit following `aa1e528`; `parseEmails` in
+lib/shares.js; the split-match block in pages/api/watch/request-link.js.
+
+**Status: SETTLED — two lessons.**
+1. Any field that accepts "an email" WILL eventually receive several; parse
+   at the boundary, never store unparsed input into a matching-critical
+   field.
+2. Legacy combined-string records still work at the gate but their token is
+   SHARED between the listed addresses — per-person revocation and view
+   tracking need a revoke + re-share under the current code.
+
+---
+
+## Episode 10 — Open/unsettled register
 
 None of these are settled. Do not treat them as bugs to hot-fix in passing;
 each is owned by a sibling skill.

@@ -61,6 +61,7 @@ must be literally observed, not assumed.
 - [ ] Extract ALL links from both emails; assert all tokens DISTINCT — paste into a file and run `grep -o 'watch/[a-f0-9]*' links.txt | sort | uniq -d` (must print nothing). With 2×2 that's 4 distinct tokens.
 - [ ] Each link gates independently (email verify on link 1 does not unlock link 2 — cookie is Path-scoped), and recipient A's email does NOT pass the gate on recipient B's link.
 - [ ] Revoke ONE pair (e.g. recipient A × video 2) → A's other link and both of B's links still work.
+- [ ] Comma-string regression guard: POST `/api/share-bulk` with legacy shape `{"videos":[...],"email":"a@b.c, d@e.f"}` and `/api/share` with `{"videoId":"...","email":"a@b.c, d@e.f"}` → each stored record's `email` field holds exactly ONE address (verify via kv-inspect), never the combined string.
 - [ ] View tracking: watch one link → its shares-table row shows Views `1×` (hover shows last-viewed time); the unwatched rows show `—`. Reload the watch page → count increments.
 - [ ] Playback tracking (needs a real Bunny video): press play → row's Watched column shows `started`; scrub past 25/50/75% → shows the milestone %; play to the end → `100% ✓`. Opening the page WITHOUT pressing play must leave Watched at `—` while Views increments — that separation is the feature's point.
 
