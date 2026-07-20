@@ -106,23 +106,40 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
 - **Result when:** seeded/test library with 101+ videos shows all titles via
   /api/videos (count equals the library's totalItems).
 
-### (f) Email-send failure handling (pages/api/share.js, share-bulk.js)
-- **Why (verified behavior as of 2026-07-18):** the KV record is written
-  BEFORE the email sends; a mailer failure then returns 500 — so a share
-  exists that no one was told about. The admin sees "Error" yet the share
-  appears in the table (confusing ghost).
-- **Asset:** the shares table already displays status; deliver() already
-  throws typed messages.
-- **First steps:** (1) decide policy — best: mark the record
-  (`emailFailed: true`, an ADDITIVE field — compatibility-safe) and surface a
-  "resend email" button; deleting the record on failure is the alternative
-  but loses the audit trail; (2) add a `/api/share/resend` admin endpoint
-  reusing sendShareEmail; (3) prediction: with SMTP creds deliberately broken,
-  creating a share yields a table row flagged "email failed" and resend works
-  after fixing creds.
-- **Result when:** the broken-creds experiment shows the flagged row and a
-  successful resend, and old records (no `emailFailed` field) render
-  unchanged.
+### (f) Email-send failure handling — ADOPTED 2026-07-20
+- **Was:** the KV record was written BEFORE the email sends; a mailer
+  failure then returned 500 — so a share existed that no one was told
+  about (confusing ghost). This is no longer open; kept here as the
+  record of what shipped and how it was verified, per lifecycle rule 5.
+- **What shipped:** `setEmailFailed(token, failed, errorMessage)`
+  (lib/shares.js) sets/clears additive `emailFailed`/`emailError` fields
+  (clears via `undefined`, so the key is dropped from JSON rather than
+  left `false` — absence means "no known failure"). `pages/api/share.js`
+  and `pages/api/share-bulk.js` now catch each recipient's send failure
+  individually, flag that recipient's record(s), and report `failures` in
+  the response instead of 500ing a batch that partially succeeded (a
+  single-recipient `/api/share` call still 500s if its one send fails —
+  there's nothing else to report). New admin-only endpoint
+  `pages/api/share/resend.js` (covered by the same middleware matcher as
+  every other `/api/*` route) re-sends from the stored record and clears
+  the flag on success. `pages/index.js` shows a red "⚠ email failed"
+  badge (title = the error) and a "Resend" button next to Revoke.
+- **Verified:** L0 (`npm run build` clean, route registered) + a live L2/L3
+  pass against a mock Upstash-REST KV and a mock SMTP listener (both
+  throwaway, not committed): created a share with SMTP unreachable → record
+  persisted with `emailFailed: true` + the real connect error →
+  `/api/share/resend` with SMTP still down → 502, flag stays → fixed SMTP →
+  resend → `{"ok":true}` → `emailFailed`/`emailError` both absent from the
+  record afterward. Bulk: 2 recipients × 2 videos with working SMTP → 4
+  distinct tokens, no flags; killed SMTP mid-batch for a 3rd recipient →
+  both of that recipient's records flagged, other recipients unaffected.
+  Middleware boundary re-checked: `/api/share/resend` 401s without admin
+  creds; `/api/watch/request-link` unaffected (still public, still 400 on
+  empty body).
+- **Not yet exercised:** live Resend API failures specifically (only SMTP
+  failure was simulated) — the `deliver()` chokepoint means the same
+  flag/resend path applies, but if Resend's SDK throws a differently-shaped
+  error, `err.message` could read oddly in `emailError`. Low risk, unverified.
 
 ### (g) Automated tests
 - Owned by bunny-sharing-validation-and-qa §4 (candidate `node --test` plan).

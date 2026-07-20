@@ -51,7 +51,11 @@ export default function Admin() {
     });
     const data = await res.json();
     if (data.ok) {
-      setMessage(`Sent to ${email}`);
+      let msg = `Sent to ${email}`;
+      if (data.failures) {
+        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (link created, email not sent — see Resend in the table below)`;
+      }
+      setMessage(msg);
       setShareForVideo(null);
       setEmail("");
       loadAll();
@@ -81,7 +85,7 @@ export default function Admin() {
       const sentTo = data.recipients.map((r) => r.email).join(", ");
       let msg = `Created ${data.count} separate link${data.count !== 1 ? "s" : ""}; emailed ${sentTo}`;
       if (data.failures) {
-        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (links created, email not sent)`;
+        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (links created, email not sent — see Resend in the table below)`;
       }
       setMessage(msg);
       setSelected(new Set());
@@ -112,6 +116,18 @@ export default function Admin() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     });
+    loadAll();
+  }
+
+  async function resend(token) {
+    setMessage("Resending...");
+    const res = await fetch("/api/share/resend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? "Email sent" : `Error: ${data.error}`);
     loadAll();
   }
 
@@ -243,7 +259,14 @@ export default function Admin() {
                   /watch/{s.token}
                 </a>
               </td>
-              <td>{statusOf(s)}</td>
+              <td>
+                {statusOf(s)}
+                {s.emailFailed && (
+                  <div style={styles.emailFailedBadge} title={s.emailError || "Email failed to send"}>
+                    ⚠ email failed
+                  </div>
+                )}
+              </td>
               <td title={s.lastViewedAt ? `Last viewed ${new Date(s.lastViewedAt).toLocaleString()}` : "Never viewed"}>
                 {s.viewCount ? `${s.viewCount}×` : "—"}
               </td>
@@ -252,6 +275,11 @@ export default function Admin() {
               </td>
               <td>{new Date(s.expiresAt).toLocaleString()}</td>
               <td>
+                {statusOf(s) === "Active" && s.emailFailed && (
+                  <button onClick={() => resend(s.token)} style={styles.btn}>
+                    Resend
+                  </button>
+                )}
                 {statusOf(s) === "Active" && (
                   <button onClick={() => revoke(s.token)} style={styles.btnDanger}>
                     Revoke
@@ -281,4 +309,5 @@ const styles = {
   message: { color: "#1f6feb" },
   bulkBar: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, marginBottom: 16, border: "1px solid #1f6feb", background: "#eef4ff", borderRadius: 8 },
   selectLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4, cursor: "pointer" },
+  emailFailedBadge: { fontSize: 12, color: "#d1242f" },
 };

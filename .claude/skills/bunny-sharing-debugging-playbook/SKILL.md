@@ -44,7 +44,7 @@ Jargon, once:
 | Embed iframe black or 403 | Open the iframe `src` directly; compare its `expires` to `date +%s` | `BUNNY_TOKEN_KEY` wrong, or the page has been open > 1 h (embed URLs are signed for 3600 s at page render, pages/watch/[token].js:171) | S1 |
 | Admin video grid empty, NO error shown | `curl` `/api/videos` yourself | API actually 500ing; the UI swallows errors (`vRes.videos \|\| []`, pages/index.js:31) | S1 |
 | `/api/videos` returns 500 | Read the JSON `error` field | `BUNNY_API_KEY` / `BUNNY_LIBRARY_ID` wrong — Bunny's own error text is passed through (lib/bunny.js:16, pages/api/videos.js:9) | S1 |
-| No share email arrives (share / bulk / magic link) | Which deliver() path is active? (`RESEND_API_KEY` set → API, else SMTP; lib/mailer.js:35) | Resend: domain/from/key problem. SMTP: port/TLS/auth. | S2 |
+| No share email arrives (share / bulk / magic link) | Which deliver() path is active? (`RESEND_API_KEY` set → API, else SMTP; lib/mailer.js:35). Check the shares table for a "⚠ email failed" badge first — the record already has the error. | Resend: domain/from/key problem. SMTP: port/TLS/auth. | S2 |
 | Magic link never arrives though the email "matches" | Did the recipient get "Check your email" (200) or an error (500)? | Mismatch vs throttle vs delivery failure — run the 4-step sequence | S2 |
 | Magic link never sends on a link that was bulk-shared to several people; all recipients got the SAME links | `record.email` in KV — does it contain commas/spaces? | Legacy combined-email record (pre-2026-07-19 comma-string bug; failure-archaeology Ep. 9). Gate now matches any listed address, so sign-in works — but the token is shared between those recipients; revoke + re-share for per-person links/tracking | S2 |
 | Recipient submits email → error "GATE_SECRET is not set…" | — | `GATE_SECRET` unset in the runtime env (lib/gate.js:14-22); build passes without it, only requests fail | S3 |
@@ -149,7 +149,7 @@ The from address is `RESEND_FROM || SMTP_FROM || SMTP_USER` (lib/mailer.js:24-26
 
 ### Resend branch
 
-Failures throw `Resend API error: <message>` (lib/mailer.js:39), which the API handlers return as a 500 JSON `error` — so the admin UI shows it after a share attempt, and the recipient's gate form shows it after requesting a magic link. Read the message; typical ones:
+Failures throw `Resend API error: <message>` (lib/mailer.js:39). What happens next depends on the endpoint (as of 2026-07-20): `/api/share` and `/api/share-bulk` catch each recipient's send failure individually — the KV record(s) still get created, flagged `emailFailed: true` with the error in `emailError` (lib/shares.js `setEmailFailed`), and reported in a `failures` array in the response (200 if at least one recipient succeeded, 500 only if ALL failed). The admin table shows a "⚠ email failed" badge (hover for the error) and a "Resend" button that hits `/api/share/resend` — check there FIRST before re-triggering a whole new share. The magic-link path (`/api/watch/request-link`) is different: it has no record to flag (nothing new is created) and stays behind the uniform anti-enumeration response — see "Magic-link email specifically" below. Typical `emailError`/thrown messages:
 
 - domain not verified (Resend 403) → verify the sending domain in the Resend dashboard, or use `onboarding@resend.dev` for tests.
 - invalid `from` (Resend 422) → `RESEND_FROM` (or fallback) is not an address on a verified domain.

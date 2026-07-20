@@ -1,4 +1,4 @@
-import { createShareRecord, baseUrl, parseEmails } from "../../lib/shares";
+import { createShareRecord, setEmailFailed, baseUrl, parseEmails } from "../../lib/shares";
 import { sendBulkShareEmail } from "../../lib/mailer";
 
 // Creates a separate share (distinct token + link) for every recipient x video
@@ -37,7 +37,7 @@ export default async function handler(req, res) {
           hours,
           siteUrl,
         });
-        created.push({ videoId, videoTitle: record.videoTitle, link, expiresAt: record.expiresAt });
+        created.push({ token: record.token, videoId, videoTitle: record.videoTitle, link, expiresAt: record.expiresAt });
       }
       if (created.length === 0) {
         return res.status(400).json({ error: "No valid videos to share" });
@@ -51,8 +51,11 @@ export default async function handler(req, res) {
         });
         results.push({ email: to, links: created.map((c) => ({ videoId: c.videoId, link: c.link })) });
       } catch (err) {
-        // Records exist but this recipient's email failed — report it rather
+        // Records exist but this recipient's email failed — flag each one so
+        // they aren't silent ghosts in the admin table (persists past reload,
+        // unlike the one-time failures array below), and report it rather
         // than failing the whole batch (other recipients may have succeeded).
+        await Promise.all(created.map((c) => setEmailFailed(c.token, true, err.message)));
         failures.push({ email: to, error: err.message });
       }
     }

@@ -64,6 +64,7 @@ must be literally observed, not assumed.
 - [ ] Comma-string regression guard: POST `/api/share-bulk` with legacy shape `{"videos":[...],"email":"a@b.c, d@e.f"}` and `/api/share` with `{"videoId":"...","email":"a@b.c, d@e.f"}` → each stored record's `email` field holds exactly ONE address (verify via kv-inspect), never the combined string.
 - [ ] View tracking: watch one link → its shares-table row shows Views `1×` (hover shows last-viewed time); the unwatched rows show `—`. Reload the watch page → count increments.
 - [ ] Playback tracking (needs a real Bunny video): press play → row's Watched column shows `started`; scrub past 25/50/75% → shows the milestone %; play to the end → `100% ✓`. Opening the page WITHOUT pressing play must leave Watched at `—` while Views increments — that separation is the feature's point.
+- [ ] Email-failure handling (as of 2026-07-20): with SMTP/Resend deliberately broken, create a share → response is still 200 with a `failures` entry (single-recipient `/api/share` is the exception — one recipient, one failure, 500) and the record persists with `emailFailed: true`; the shares table shows "⚠ email failed"; click Resend after fixing creds → `emailFailed`/`emailError` disappear from the record (verify via kv-inspect, not just the UI).
 
 ### Expiry
 - [ ] Create a share with hours = a small fraction (e.g. 0.02 ≈ 72 s — `hours` is multiplied by 3600·1000; verify the record's expiresAt via kv-inspect).
@@ -96,7 +97,8 @@ As of 2026-07-18:
 | --- | --- | --- |
 | Gate crypto (lib/gate.js) | CERTIFIED | gate-selftest 9/9, run 2026-07-18 |
 | Production build | CERTIFIED | `npm run build` clean (with expected middleware-deprecation warning) |
-| Everything live (email delivery, gate E2E, bulk E2E, Bunny playback) | UNCERTIFIED | Never exercised against real services — bunny-sharing-email-gate-campaign is the path to certification |
+| Email-failure flagging/resend (setEmailFailed, /api/share/resend) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against a throwaway mock Upstash-REST KV + mock SMTP listener — flag set on failure, persists past reload, cleared on successful resend, bulk per-recipient isolation confirmed. NOT yet tried against real Resend failures specifically |
+| Everything else live (real email delivery, gate E2E, bulk E2E, Bunny playback) | UNCERTIFIED | Never exercised against real services — bunny-sharing-email-gate-campaign is the path to certification |
 
 Update this table (via change-control) whenever a campaign phase or E2E
 checklist upgrades a surface.

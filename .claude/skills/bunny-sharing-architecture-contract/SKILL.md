@@ -279,7 +279,7 @@ scope decisions or unfinished hardening. "Candidate-fix" items live in
 | Magic-link grant is NOT single-use within its 15-min TTL — replayable if intercepted. Mitigated: cookie exchange + redirect strips it from URL/history | Medium | Candidate-fix (top hardening item in bunny-sharing-email-gate-campaign) |
 | Throttle is 30 s per share token only (`gatethrottle:<token>`); no per-IP rate limiting on `/api/watch/request-link` | Low-Medium (email-bombing across many tokens, or KV load) | Candidate-fix (bunny-sharing-roadmap) |
 | No tests, no linter, no CI (two scanners were added, then deleted — see bunny-sharing-failure-archaeology). Verification is manual | Medium (process risk, not runtime risk) | Candidate-fix (bunny-sharing-validation-and-qa) |
-| `share`/`share-bulk` store records BEFORE sending email; a send failure leaves a live record whose recipient never got the link | Low (admin sees the 500 and can revoke/resend) | Accepted-for-now; noted in bunny-sharing-debugging-playbook |
+| `share`/`share-bulk` store records BEFORE sending email; a send failure leaves a live record whose recipient never got the link | Low | Fixed 2026-07-20: failed sends are flagged (`emailFailed`/`emailError`, additive fields) instead of silently existing, and an admin "Resend" button (`/api/share/resend`) re-sends and clears the flag — see section 5.1 |
 | The email gate has NOT been exercised against live Resend + a real inbox + prod Bunny/KV | High (unproven core flow) | Open — THE campaign: bunny-sharing-email-gate-campaign |
 | Revocation is not instant: an in-flight Bunny embed token stays valid up to 3600 s after revoke (section 2.5) | Low (bounded window, by design) | Accepted-for-now |
 | `GATE_SECRET` rotation is all-or-nothing (section 2.2) | Low (operational footgun, not a vuln) | Accepted-for-now; document before any rotation |
@@ -311,6 +311,8 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `firstPlayedAt` / `lastPlayedAt` | number (optional) | Unix ms; additive |
 | `maxProgressPct` | number (optional) | Furthest playback progress 0-100, monotonic (server takes max) |
 | `completedAt` | number (optional) | Unix ms of first `ended` event; additive |
+| `emailFailed` | boolean (optional) | Set `true` by `share.js`/`share-bulk.js` when the notification email failed to send (record still created; link still live). Set via `setEmailFailed` (lib/shares.js), which stores `undefined` (dropped from JSON, not written as `false`) to clear it rather than leaving a stale flag — absence means "no known failure", not "definitely sent" |
+| `emailError` | string (optional) | The failed send's error message, for the admin table tooltip; cleared alongside `emailFailed` |
 
 View fields are written by `pages/watch/[token].js` only on the AUTHORIZED
 branch (valid cookie grant → embed render) — never for the email form or a
