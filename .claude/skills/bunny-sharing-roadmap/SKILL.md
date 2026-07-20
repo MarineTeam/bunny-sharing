@@ -146,22 +146,56 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   Priority: rises sharply the moment any lifecycle rule-3 prediction is
   awkward to verify by hand twice.
 
-### (h) Bulk "bundle" landing page
-- **Why:** a bulk recipient gets N links in one email; a single landing page
-  listing their videos would be friendlier.
-- **Compatibility question to answer FIRST (design pass required):** today
-  bulk creates N independent records with no grouping entity. A bundle page
-  needs either a new `bunnybundle:<id>` record listing member tokens
-  (additive — safe) or a `bundleId` field on share records (additive — also
-  safe). Either way existing N-link emails and per-video /watch URLs must
-  keep working; the bundle page is an ADDITION, never a replacement.
-- **First steps:** (1) write the design note (entity choice, gate semantics —
-  does one email verification unlock the bundle page but still per-video
-  cookies?); (2) prototype `/bundle/<id>` read-only listing; (3) route
-  through change-control as behavior-affecting.
-- **Result when:** a bulk share yields one bundle link whose page lists
-  exactly its member videos, each still individually gated and revocable,
-  with the P3 distinctness check still passing.
+### (h) Bulk "bundle" landing page — ADOPTED 2026-07-20
+- **Was:** a bulk recipient got N links in one email with no single page
+  listing them. Kept here as the record of the design decisions and what
+  shipped, per lifecycle rule 5.
+- **Design decisions made:** entity = new `bunnybundle:<id>` record
+  (`lib/bundles.js`) holding ONLY `{id, email, tokens, createdAt, expiresAt}`
+  — never a member's title/status, which is always re-read live from that
+  member's own `bunnyshare:<token>` record (no second source of truth; see
+  architecture-contract 2.6/5.1a). Gate semantics = ONE email verification
+  unlocks the WHOLE bundle: the grant→cookie exchange
+  (`pages/bundle/[bundleId].js`) mints a `gate_bundle_<id>` cookie for the
+  listing page AND a standard `gate_<token>` cookie for every member, so
+  clicking through to any video plays immediately without a second
+  verification — while every video still independently re-checks
+  revoked/expired on every render, so revocation and per-person tracking are
+  completely unaffected.
+- **What shipped:** `lib/bundles.js` (`createBundleRecord`,
+  `getBundleMembers`); `pages/bundle/[bundleId].js` (gate + listing page,
+  mirrors `pages/watch/[token].js`'s structure); `pages/api/bundle/request-link.js`
+  (public, mirrors `pages/api/watch/request-link.js` — same uniform
+  anti-enumeration response, same 15-min/30s TTL/throttle constants);
+  `sendBundleMagicLinkEmail` (lib/mailer.js); `middleware.js` matcher widened
+  to `"/api/((?!watch/|bundle/).*)"`; `pages/api/share-bulk.js` now creates
+  one bundle per recipient per call and adds one "view them all in one
+  place" line to the existing bulk email (additive, existing per-video links
+  unchanged); `pages/api/cleanup.js` now also sweeps expired
+  `bunnybundle:*` records (bundles have no `revoked` flag, expiry only).
+- **Verified:** L0 (`npm run build` clean, both new routes registered) + a
+  live L2/L3 pass against a mock Upstash-REST KV and a mock SMTP listener:
+  bulk-shared 2 videos to one recipient → got a `bundleLink` in the API
+  response → opened it unauthenticated → email form (not the list) →
+  requested the bundle magic link → extracted the real grant from the raw
+  SMTP message → exchanged it → response set THREE cookies in one response
+  (`gate_bundle_<id>` + both `gate_<token>`s) → bundle listing then showed
+  both videos as links → opening one video page directly with its own
+  minted cookie played immediately (no re-verification) → revoked one member
+  via `/api/revoke` → that video's `/watch` page showed "revoked" AND the
+  bundle listing simultaneously downgraded that entry to non-clickable
+  "Vid One — revoked" text while the other stayed a live link (proves no
+  second source of truth) → a tampered grant on the bundle URL fell back to
+  the email form, not the list. Middleware boundary re-checked:
+  `/api/bundle/request-link` reachable unauthenticated (400 on empty body,
+  not 401); `/api/share/resend` and `/api/shares` still 401 without admin
+  creds. Anti-enumeration uniformity re-checked for the new endpoint
+  (right/wrong/nonexistent-bundle all byte-identical responses).
+- **Not yet exercised:** production deploy (P4-style, real https +
+  Secure-cookie flag), and the admin UI only surfaces bundle links in the
+  bulk-share success toast — there's no persistent "view bundle link" button
+  in the shares table the way Revoke/Resend have one. Low priority; the link
+  is already in the recipient's email and in the API response.
 
 ## 3. Positioning: standard vs actually nice
 

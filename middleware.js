@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 
 // Protects the admin page and its API routes with HTTP Basic Auth.
-// The /watch/[token] page is NOT covered, so recipients can open their link
-// freely — and neither is /api/watch/*, the public endpoints recipients call to
-// request their email-gated sign-in link.
+// The /watch/[token] and /bundle/[bundleId] pages are NOT covered, so
+// recipients can open their links freely — and neither are /api/watch/* or
+// /api/bundle/*, the public endpoints recipients call to request their
+// email-gated sign-in links.
 export function middleware(req) {
   const auth = req.headers.get("authorization");
   const user = process.env.ADMIN_USER;
@@ -27,6 +28,6 @@ export function middleware(req) {
 }
 
 export const config = {
-  // Everything under /api EXCEPT /api/watch/* (recipient-facing, must stay public).
-  matcher: ["/", "/api/((?!watch/).*)"],
+  // Everything under /api EXCEPT /api/watch/* and /api/bundle/* (recipient-facing, must stay public).
+  matcher: ["/", "/api/((?!watch/|bundle/).*)"],
 };

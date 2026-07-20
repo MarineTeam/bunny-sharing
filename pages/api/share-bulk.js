@@ -1,4 +1,5 @@
 import { createShareRecord, setEmailFailed, baseUrl, parseEmails } from "../../lib/shares";
+import { createBundleRecord } from "../../lib/bundles";
 import { sendBulkShareEmail } from "../../lib/mailer";
 
 // Creates a separate share (distinct token + link) for every recipient x video
@@ -43,20 +44,26 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "No valid videos to share" });
       }
 
+      // Group this recipient's tokens under one gated listing page. The
+      // bundle record exists independent of the notification email below —
+      // it's just as valid to hand out even if the email send fails.
+      const { link: bundleLink } = await createBundleRecord({ email: to, members: created, siteUrl });
+
       try {
         await sendBulkShareEmail({
           to,
           items: created.map((c) => ({ videoTitle: c.videoTitle, link: c.link })),
           expiresAt: Math.max(...created.map((c) => c.expiresAt)),
+          bundleLink,
         });
-        results.push({ email: to, links: created.map((c) => ({ videoId: c.videoId, link: c.link })) });
+        results.push({ email: to, links: created.map((c) => ({ videoId: c.videoId, link: c.link })), bundleLink });
       } catch (err) {
         // Records exist but this recipient's email failed — flag each one so
         // they aren't silent ghosts in the admin table (persists past reload,
         // unlike the one-time failures array below), and report it rather
         // than failing the whole batch (other recipients may have succeeded).
         await Promise.all(created.map((c) => setEmailFailed(c.token, true, err.message)));
-        failures.push({ email: to, error: err.message });
+        failures.push({ email: to, error: err.message, bundleLink });
       }
     }
 

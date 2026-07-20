@@ -4,7 +4,8 @@ description: >
   Symptom-to-cause triage for the Bunny Video Sharing app: thumbnails 403,
   embed iframe black/403, empty video grid, no email arriving (Resend or SMTP),
   magic-link/sign-in-link problems, /watch errors, "sign-in link expired" loops,
-  Basic-Auth loops, KV errors, missing share records, and build warnings. Load
+  Basic-Auth loops, KV errors, missing share records, bundle/listing-page
+  ("view all your videos" link) problems, and build warnings. Load
   this when something is BROKEN and you need to find out why. Do NOT load for
   first-time setup (use bunny-sharing-env-and-setup), for running the
   measurement/probe scripts (bunny-sharing-diagnostics), for the history behind
@@ -34,6 +35,7 @@ Jargon, once:
 - **grant** — HMAC-signed proof of email control, `body.sig` in base64url, signed with `GATE_SECRET` (lib/gate.js). Emailed as `?grant=` (15 min TTL), then exchanged for a cookie.
 - **gate cookie** — `gate_<token>`, HttpOnly, `Path=/watch/<token>`, lives until share expiry (pages/watch/[token].js:150-153).
 - **two Bunny keys** — `BUNNY_TOKEN_KEY` signs iframe embed URLs (sha256 **hex**); `BUNNY_CDN_TOKEN_KEY` signs direct CDN URLs like thumbnails (sha256 **base64url**). Different keys, different encodings (lib/bunny.js:40-65).
+- **bundle** — a `bunnybundle:<id>` KV record (lib/bundles.js) grouping one recipient's tokens from one `/api/share-bulk` call; gated at `/bundle/<id>` by the same grant mechanism, pseudo-token `bundle:<id>`. Purely a grouping list — a member's title/status always comes live from that member's own `bunnyshare:<token>` record, never from the bundle record itself.
 
 ## Master triage table
 
@@ -53,10 +55,12 @@ Jargon, once:
 | Magic link click → silently back to the email form | Was the test over plain http with `SITE_URL=https://…`? | Cookie set with `Secure` but browsed over http → browser drops it (pages/watch/[token].js:146-153) | S3 |
 | Cookie works on one share, not another for same viewer | — | By design: cookie is `Path=/watch/<token>`, scoped per share | S3 |
 | Browser Basic-Auth prompt loops on `/` or admin APIs | Are `ADMIN_USER`/`ADMIN_PASS` set in the runtime env? | Unset or mismatched — unset can never match (middleware.js:9-18) | S4 |
-| `/api/watch/request-link` returns 401 | `git diff` middleware.js matcher | Matcher regressed; must be `"/api/((?!watch/).*)"` (middleware.js:31) | S4 |
+| `/api/watch/request-link` or `/api/bundle/request-link` returns 401 | `git diff` middleware.js matcher | Matcher regressed; must be `"/api/((?!watch/\|bundle/).*)"` (middleware.js:31, widened 2026-07-20) | S4 |
 | `KV error 401: …` (or other status) in errors/logs | `curl` KV directly | Bad `KV_REST_API_TOKEN` / wrong `KV_REST_API_URL` (lib/kv.js:14) | S5 |
 | Share record missing / shares table empty though shares exist | `KEYS bunnyshare:*` vs `KEYS share:*` | Wrong KV database, or records under the pre-30ecd7f `share:` prefix (orphaned) | S5 |
 | Build prints `⚠ The "middleware" file convention is deprecated. Please use "proxy" instead.` | — | EXPECTED on next 16.2.10. Not an error. Do not rename without change-control. | S6 |
+| `/bundle/<id>` shows "Link not found" right after a bulk share | `KEYS bunnybundle:*` in KV; confirm `share-bulk` actually returned a `bundleLink` in its response | Bundle creation failed silently, or you're pointed at a different KV database than the app used (see S5's `share:`/`bunnyshare:` divergence check — same trap applies to `bunnybundle:`) | S7 |
+| Bundle magic link exchanges fine but individual videos still show the email form | Check the exchange response's `Set-Cookie` headers — should be ONE `gate_bundle_<id>` PLUS one `gate_<token>` per member in the SAME response | Cookies not applied by the client (multiple `Set-Cookie` headers dropped by a proxy/test tool that only keeps the last one — real browsers handle this fine); or a member's own `bunnyshare:<token>` record was already revoked/expired at exchange time, which correctly skips minting that one cookie (pages/bundle/[bundleId].js) | S7 |
 
 ## S1 — Playback and thumbnails
 
@@ -321,6 +325,37 @@ This is EXPECTED (reproduced 2026-07-18, build succeeds). It is a deprecation no
 
 Also expected: build succeeds with ZERO env vars set (verified 2026-07-18) — every config failure in this playbook is runtime-only. A green build proves nothing about configuration.
 
+## S7 — Bundle listing page (added 2026-07-20)
+
+`pages/bundle/[bundleId].js` mirrors `pages/watch/[token].js`'s flow one
+level up: load `bunnybundle:<id>` → invalid/expired page if missing or past
+`expiresAt`; `?grant=` present and valid (bound to pseudo-token
+`bundle:<id>`) → mint a `gate_bundle_<id>` cookie AND a `gate_<token>` cookie
+for every member, redirect to the clean bundle URL; valid `gate_bundle_<id>`
+cookie → re-fetch every member's own `bunnyshare:<token>` LIVE and render the
+list (never trust a cached title/status on the bundle record itself — there
+isn't one); else the email form, posting to `/api/bundle/request-link`.
+
+Debugging is almost identical to S2/S3 above with a bundle-shaped id instead
+of a token — reuse those sections' techniques (fingerprint `GATE_SECRET`,
+check for `bundlethrottle:<id>` the same way as `gatethrottle:<token>`,
+check `Secure`-on-http the same way) with these substitutions:
+
+```bash
+curl -s -H "Authorization: Bearer $KV_REST_API_TOKEN" "$KV_REST_API_URL/get/bunnybundle:<id>"
+# .tokens should list every member token from that bulk-share call
+curl -s -H "Authorization: Bearer $KV_REST_API_TOKEN" "$KV_REST_API_URL/get/bundlethrottle:<id>"
+# {"result":"1"} = throttled (< 30 s since last magic-link send for this bundle)
+```
+
+One thing this page does that `/watch/[token].js` does not: it issues
+MULTIPLE `Set-Cookie` headers in one response (the bundle cookie plus one
+per member). If a test tool (some HTTP clients, some proxies) only surfaces
+the last `Set-Cookie` header, that looks like "the exchange silently failed
+to unlock the videos" when it didn't — real browsers apply every
+`Set-Cookie` header in a response. Verify with a tool that shows all headers
+(e.g. `curl -i` prints each one on its own line) before suspecting the code.
+
 ## Traps that cost real time
 
 **The two Bunny keys.** Bunny has two unrelated token-auth schemes and this app uses both: `BUNNY_TOKEN_KEY` (the Stream library's Embed View Token) signs iframe embed URLs as sha256 hex, while `BUNNY_CDN_TOKEN_KEY` (the pull zone's Token Authentication key, buried under Library > API > "CDN zone management" > Manage > Security) signs direct CDN URLs like thumbnails as base64url with `+/=` rewritten (lib/bunny.js:40-65). Before commit 65dc992 (2026-07-14) the app only knew the first key, so enabling pull-zone Token Authentication made every thumbnail 403 while embeds kept working — a baffling half-broken state. If exactly one of {thumbnails, embeds} is 403ing, suspect the corresponding key before anything else, and never assume one key serves both.
@@ -341,15 +376,15 @@ Also expected: build succeeds with ZERO env vars set (verified 2026-07-18) — e
 
 ## Provenance and maintenance
 
-Written 2026-07-18 against branch `claude/bulk-share-separate-links-auth-cblrle` @ 5905bba; every cited line was read in that tree and the build warning + no-env build were reproduced the same day. Re-verify before trusting drifted facts:
+Written 2026-07-18 against branch `claude/bulk-share-separate-links-auth-cblrle` @ 5905bba; every cited line was read in that tree and the build warning + no-env build were reproduced the same day. S7 and the bundle-related table rows added 2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`/`pages/api/bundle/request-link.js`, verified live against a mock KV + mock SMTP. Re-verify before trusting drifted facts:
 
 ```bash
-git log --oneline -1                                          # still near 5905bba?
+git log --oneline -1                                          # still near 5905bba (plus later commits)?
 grep -n "RESEND_API_KEY" lib/mailer.js                        # deliver() path selection (~:35)
 grep -n "465" lib/mailer.js                                   # secure-iff-465 (~:47)
-grep -n "matcher" middleware.js                               # auth matcher (~:31)
+grep -n "matcher" middleware.js                               # auth matcher (~:31) — expect (?!watch/|bundle/)
 grep -n "MAGIC_LINK_TTL_MS\|THROTTLE_SECONDS" pages/api/watch/request-link.js   # 15 min / 30 s
-grep -n "bunnyshare:\|gatethrottle:" -r pages lib             # KV key prefixes
+grep -n "bunnyshare:\|gatethrottle:\|bunnybundle:\|bundlethrottle:" -r pages lib  # KV key prefixes
 grep -n "generateEmbedUrl(record.videoId" pages/watch/[token].js  # 3600 s embed signing
 grep -rn "digest(\"hex\")\|digest(\"base64\")" lib/bunny.js   # two encodings, two keys
 npm run build 2>&1 | grep middleware                          # deprecation warning still expected?

@@ -1,9 +1,10 @@
 ---
 name: bunny-sharing-run-and-operate
 description: >
-  Operate the bunny-sharing app: run dev/build/start, understand the admin and
-  recipient user journeys end-to-end (what happens server-side at each step),
-  KV data conventions (bunnyshare:/gatethrottle: keys), and the operating
+  Operate the bunny-sharing app: run dev/build/start, understand the admin,
+  recipient, and bundle-listing user journeys end-to-end (what happens
+  server-side at each step), KV data conventions
+  (bunnyshare:/gatethrottle:/bunnybundle:/bundlethrottle: keys), and the operating
   runbook — revoke shares, inspect shares, run cleanup, rotate GATE_SECRET or
   ADMIN_PASS, deploy to Vercel. Load this when running the app, answering "how
   does the flow work", or performing routine admin/ops tasks on a working
@@ -43,22 +44,26 @@ scripts exist.
 | `npm run build` | `next build` — production build with Turbopack (Next.js 16.2.10). **Needs NO env vars**: all config is read at request time, and `lib/gate.js`'s fail-loud `GATE_SECRET` check is runtime-only. Verified 2026-07-18: build succeeds in a shell with no `.env.local` and no env vars set. |
 | `npm run start` | `next start` — serves the production build on port 3000. Run `npm run build` first. This DOES need env vars to serve real traffic. |
 
-### Expected build output (as of 2026-07-18, next 16.2.10)
+### Expected build output (as of 2026-07-20, next 16.2.10)
 
-A healthy build prints this exact route manifest — 10 routes plus the
+A healthy build prints this exact route manifest — 13 routes plus the
 middleware line:
 
 ```
 Route (pages)
 ┌ ○ /
 ├ ○ /404
+├ ƒ /api/bundle/request-link
 ├ ƒ /api/cleanup
 ├ ƒ /api/revoke
 ├ ƒ /api/share
 ├ ƒ /api/share-bulk
+├ ƒ /api/share/resend
 ├ ƒ /api/shares
 ├ ƒ /api/videos
 ├ ƒ /api/watch/request-link
+├ ƒ /api/watch/track
+├ ƒ /bundle/[bundleId]
 └ ƒ /watch/[token]
 
 ƒ Proxy (Middleware)
@@ -76,7 +81,7 @@ Every build prints:
 ```
 
 This is known and deliberate. `middleware.js` implements the Basic Auth
-boundary with the matcher `["/", "/api/((?!watch/).*)"]`
+boundary with the matcher `["/", "/api/((?!watch/|bundle/).*)"]`
 (middleware.js:29-32) — the security perimeter of the whole app. Renaming
 `middleware.js` to `proxy.js` is a behavior-affecting change to that
 perimeter and must go through bunny-sharing-change-control, with the matcher
@@ -104,9 +109,11 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    (`pages/api/share.js`): `createShareRecord` (lib/shares.js) mints
    `token = crypto.randomBytes(16).toString("hex")`, writes the record to
    `bunnyshare:<token>`, then `sendShareEmail` emails the recipient
-   `<site>/watch/<token>`. NOTE: the record is stored BEFORE the email is
-   sent — an email failure still leaves a live share record (known weak
-   point).
+   `<site>/watch/<token>`. The record is stored BEFORE the email is sent, so
+   a send failure still leaves a live share record — as of 2026-07-20 this
+   is flagged (`emailFailed`/`emailError`, shown as "⚠ email failed" in the
+   shares table) rather than being a silent ghost, and an admin-only Resend
+   button (`/api/share/resend`) re-sends and clears the flag.
 4. **Bulk share** — tick Select checkboxes on 2+ cards → a bulk bar appears
    with an emails field (comma/space/semicolon-separated, one or more) and
    ONE hours field → `POST /api/share-bulk` with
@@ -114,11 +121,14 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    `email` string still accepted). Server side (`pages/api/share-bulk.js`):
    loops recipients × videos, calls `createShareRecord` once per pair
    (skipping entries with falsy `id`; 400 if none valid) → **M×N distinct
-   tokens, each independently revocable** — then sends each recipient ONE
-   consolidated email listing only their own links (`sendBulkShareEmail`).
-   A failed send for one recipient is reported in the response `failures`
-   array without blocking the others (their records exist — resend or
-   revoke). Invariant: bulk never reuses a token across pairs. Views are
+   tokens, each independently revocable** — then creates ONE `bunnybundle:<id>`
+   record per recipient grouping their tokens (`createBundleRecord`,
+   lib/bundles.js) and sends each recipient ONE consolidated email listing
+   their own links plus a link to `/bundle/<id>` — a gated page listing all
+   of them (see 2c below; added 2026-07-20). A failed send for one recipient
+   is reported in the response `failures` array without blocking the others
+   (their records exist — resend or revoke). Invariant: bulk never reuses a
+   token across pairs. Views are
    tracked per record (`viewCount`/`lastViewedAt`, shown in the shares
    table's Views column), and real playback separately
    (`playCount`/`maxProgressPct`/`completedAt` via `/api/watch/track`,
@@ -136,8 +146,10 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    reversible/auditable).
 7. **Cleanup** — the "Clean up expired & revoked" button confirms then
    `POST /api/cleanup`. Server side scans `bunnyshare:*` and DELETES every
-   record that is revoked or past `expiresAt`, returning `{deleted: <n>}`.
-   This is the only path that removes records.
+   record that is revoked or past `expiresAt`; also scans `bunnybundle:*`
+   and deletes any past its own `expiresAt` (no `revoked` flag on bundles —
+   see 2c). Returns `{deleted: <n>}` covering both. This is the only path
+   that removes records.
 
 ### 2b. RECIPIENT journey
 
@@ -171,8 +183,42 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    and renders the iframe player.
 7. **Re-verification is per-share and per-browser** — the cookie is
    Path-scoped to exactly `/watch/<token>`, so a recipient with 3 bulk links
-   verifies 3 times (once per link). A new browser, cleared cookies, or
-   cookie expiry all mean re-running steps 3-5. This is by design, not a bug.
+   verifies 3 times (once per link) UNLESS they instead verify once through
+   the bundle page (2c) — that mints all 3 cookies in one go.
+
+### 2c. BUNDLE journey (added 2026-07-20)
+
+A shortcut for the RECIPIENT journey when links came from a bulk share:
+instead of re-verifying per video, one verification on the bundle page
+unlocks all of them.
+
+1. **Bundle link** — recipient clicks `<site>/bundle/<bundleId>` (from the
+   bulk-share email, alongside the per-video links). Public, never matched
+   by the middleware.
+2. **Server loads the bundle** — `pages/bundle/[bundleId].js` reads
+   `bunnybundle:<bundleId>`. Missing → "Link not found." Past its
+   `expiresAt` (the max of all members') → "This link has expired." No
+   `revoked` check — bundles don't have one.
+3. **Email form** — posts to `POST /api/bundle/request-link` with
+   `{bundleId, email}`; same uniform generic-200 response as the per-video
+   gate, same 15-min grant TTL, same 30 s throttle key
+   (`bundlethrottle:<bundleId>`).
+4. **Magic-link click** — grant is bound to pseudo-token `bundle:<bundleId>`
+   (never collides with a real video token). Valid → the server mints a
+   `gate_bundle_<bundleId>` cookie (Path=`/bundle/<bundleId>`) for the
+   listing page **and**, for every member token, the exact same
+   `gate_<token>` cookie the per-video journey would have produced
+   (Path=`/watch/<token>`) — all in one Set-Cookie response. Redirects to
+   the clean bundle URL.
+5. **Listing** — with a valid bundle cookie, the page re-fetches every
+   member's `bunnyshare:<token>` LIVE (never trusts a cached status) and
+   lists each as a clickable link if active, or plain text `<title> —
+   revoked`/`<title> — expired` otherwise.
+6. **Clicking through** — because step 4 already minted that video's own
+   cookie, opening any member's `/watch/<token>` plays immediately — no
+   second email round-trip. Revoking a member still takes effect
+   immediately regardless: `/watch/<token>` re-checks `revoked` on every
+   render independent of the cookie (invariant 3, architecture-contract).
 
 ## 3. Data conventions: where state lives
 
@@ -204,6 +250,28 @@ Written by `pages/api/watch/request-link.js` via `kvSetEx(key, 1, 30)` —
 value `1`, Redis `EX=30`, so it auto-expires after 30 seconds. While present,
 repeat magic-link requests for that share silently skip the email send (the
 response is still the generic 200). These keys never need manual cleanup.
+
+### Key: `bunnybundle:<bundleId>` — bundle records (added 2026-07-20)
+
+One JSON object per recipient per `/api/share-bulk` call, written by
+`createBundleRecord` (lib/bundles.js):
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | 32 hex chars, same as in the key and the `/bundle/` URL |
+| `email` | string | The one recipient this bundle was created for |
+| `tokens` | array of string | Member share tokens — the truth for each member's title/status is ALWAYS re-read from its own `bunnyshare:<token>` record, never cached here |
+| `createdAt` | number | ms epoch |
+| `expiresAt` | number | ms epoch = max of all members' `expiresAt` |
+
+No `revoked` field — a bundle isn't itself revocable, only its members are
+(via their own `bunnyshare:` records). Deleted by `/api/cleanup` once past
+`expiresAt`.
+
+### Key: `bundlethrottle:<bundleId>` — bundle magic-link throttle (self-expiring)
+
+Same shape and purpose as `gatethrottle:<token>`, written by
+`pages/api/bundle/request-link.js`.
 
 ## 4. Operating tasks runbook
 
@@ -334,19 +402,22 @@ must update their exported `ADMIN_PASS`.
 ## Provenance and maintenance
 
 Every fact above was read from the repo at branch
-`claude/bulk-share-separate-links-auth-cblrle` on 2026-07-18. Re-verify
+`claude/bulk-share-separate-links-auth-cblrle` on 2026-07-18; the route
+manifest, cleanup, bulk-share, and bundle (2c) sections were updated
+2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`. Re-verify
 before trusting, in one line each:
 
 | Claim | Re-verify with |
 | --- | --- |
 | npm scripts are exactly dev/build/start | `cat package.json` |
-| Route manifest (10 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
+| Route manifest (13 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
 | Build needs no env vars | `env -i PATH="$PATH" HOME="$HOME" npm run build` in a checkout with no `.env.local` |
-| Basic Auth matcher / public routes | `cat middleware.js` (matcher at bottom) |
+| Basic Auth matcher / public routes | `cat middleware.js` (matcher at bottom, expect `(?!watch/\|bundle/)`) |
 | Share record fields + key prefix | `grep -n "bunnyshare" lib/shares.js pages/api/*.js pages/watch/*.js` and read `createShareRecord` in `lib/shares.js` |
 | Throttle key, TTL 30 s, magic-link TTL 15 min | `grep -n "THROTTLE_SECONDS\|MAGIC_LINK_TTL_MS\|gatethrottle" pages/api/watch/request-link.js` |
 | Cookie name/scope/flags | `grep -n "Set-Cookie\|cookieName" "pages/watch/[token].js"` |
 | Status derived client-side | `grep -n "statusOf" pages/index.js` |
+| Bundle record shape + cleanup sweep | `grep -n "createBundleRecord\|getBundleMembers" lib/bundles.js`; `grep -n "bunnybundle" pages/api/cleanup.js` |
 | Revoke = flag flip; cleanup = delete revoked/expired | `cat pages/api/revoke.js pages/api/cleanup.js` |
 | No cron configured | `ls vercel.json` (should error: No such file) |
 | No CI | `ls .github/workflows` (should not exist) |

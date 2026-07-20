@@ -4,7 +4,8 @@ description: >
   Evidence standards for the bunny-sharing repo: the L0-L4 evidence ladder
   (build → gate self-test → live probes → manual E2E checklists → campaign
   certification), the checkbox E2E procedures for single share, bulk share,
-  expiry, anti-enumeration, and the middleware auth boundary, the
+  the bundle listing page, expiry, anti-enumeration, and the middleware auth
+  boundary, the
   golden/certified inventory, and the candidate plan for adding automated
   tests (none exist today). Load this when you need to know WHAT COUNTS AS
   PROOF that a change works, before claiming anything "works", or when adding
@@ -66,6 +67,17 @@ must be literally observed, not assumed.
 - [ ] Playback tracking (needs a real Bunny video): press play → row's Watched column shows `started`; scrub past 25/50/75% → shows the milestone %; play to the end → `100% ✓`. Opening the page WITHOUT pressing play must leave Watched at `—` while Views increments — that separation is the feature's point.
 - [ ] Email-failure handling (as of 2026-07-20): with SMTP/Resend deliberately broken, create a share → response is still 200 with a `failures` entry (single-recipient `/api/share` is the exception — one recipient, one failure, 500) and the record persists with `emailFailed: true`; the shares table shows "⚠ email failed"; click Resend after fixing creds → `emailFailed`/`emailError` disappear from the record (verify via kv-inspect, not just the UI).
 
+### Bundle listing page (added 2026-07-20)
+- [ ] Bulk-share ≥2 videos to one recipient → the `/api/share-bulk` response includes a `bundleLink`, and the recipient's email now also contains "view them all in one place" alongside the per-video links (both present — additive, not a replacement).
+- [ ] Open the bundle link unauthenticated → the email form, NOT the list.
+- [ ] Submit the matching email → magic link arrives; clicking it exchanges for cookies. Inspect the response headers directly (`curl -i`, not a tool that only shows the last `Set-Cookie`): ONE `gate_bundle_<id>` cookie AND one `gate_<token>` cookie per member, all in the same response.
+- [ ] Reload the bundle page → lists all member videos as links, no re-verification needed (bundle cookie).
+- [ ] Open one member's `/watch/<token>` URL directly (not by clicking from the list, to rule out any client-side state) → plays immediately, no email form — proves the per-video cookies minted by the bundle exchange are real, standard gate cookies.
+- [ ] Revoke one member via `/api/revoke` → its `/watch/<token>` page shows "revoked" AND, on the SAME reload of the bundle page, that entry becomes non-clickable text `<title> — revoked` while other members stay live links. This is the no-second-source-of-truth check — the bundle record itself must NOT have been touched by the revoke, only the member's own `bunnyshare:` record.
+- [ ] Anti-enumeration on the bundle gate: diff `/api/bundle/request-link` responses for right/wrong email and a nonexistent bundle id — must be byte-identical, same as the per-video gate.
+- [ ] Tampered bundle grant (append a character) → falls back to the email form, not the list.
+- [ ] `/api/cleanup` deletes a `bunnybundle:*` record once `Date.now() > expiresAt` (kv-inspect before/after).
+
 ### Expiry
 - [ ] Create a share with hours = a small fraction (e.g. 0.02 ≈ 72 s — `hours` is multiplied by 3600·1000; verify the record's expiresAt via kv-inspect).
 - [ ] After expiry: `/watch/<token>` shows "This link has expired."; request-link on it returns the generic 200 but sends nothing.
@@ -98,6 +110,7 @@ As of 2026-07-18:
 | Gate crypto (lib/gate.js) | CERTIFIED | gate-selftest 9/9, run 2026-07-18 |
 | Production build | CERTIFIED | `npm run build` clean (with expected middleware-deprecation warning) |
 | Email-failure flagging/resend (setEmailFailed, /api/share/resend) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against a throwaway mock Upstash-REST KV + mock SMTP listener — flag set on failure, persists past reload, cleared on successful resend, bulk per-recipient isolation confirmed. NOT yet tried against real Resend failures specifically |
+| Bundle listing page (lib/bundles.js, /bundle/[bundleId], /api/bundle/request-link) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against the same mock KV + mock SMTP — bundle creation, email-gate exchange, multi-cookie minting, live status propagation on revoke (no second source of truth), anti-enumeration uniformity, tampered-grant rejection, and cleanup sweep all observed. NOT yet exercised in production (real https, Secure-cookie flag) |
 | Everything else live (real email delivery, gate E2E, bulk E2E, Bunny playback) | UNCERTIFIED | Never exercised against real services — bunny-sharing-email-gate-campaign is the path to certification |
 
 Update this table (via change-control) whenever a campaign phase or E2E
@@ -136,10 +149,14 @@ convention, not a stated rule): Node's built-in runner.
 
 ## Provenance and maintenance
 
-Verified 2026-07-18 on branch claude/bulk-share-separate-links-auth-cblrle.
+Verified 2026-07-18 on branch claude/bulk-share-separate-links-auth-cblrle;
+email-failure and bundle sections added 2026-07-20 and verified live against
+a mock KV + mock SMTP (not real Resend/Upstash — see the golden inventory
+table's caveats for each).
 
 - Still no tests/CI: `cat package.json | grep -A4 scripts; ls .github 2>&1` (expect no test script; No such file).
 - Generic message string: `grep -n "sign-in link to it" pages/api/watch/request-link.js`.
-- 401 boundary: `grep -n "matcher" middleware.js` (expect `/api/((?!watch/).*)`).
+- 401 boundary: `grep -n "matcher" middleware.js` (expect `/api/((?!watch/|bundle/).*)`).
 - Hours→ms math: `grep -n "3600 \* 1000" lib/shares.js`.
+- Bundle record shape: `grep -n "createBundleRecord\|getBundleMembers" lib/bundles.js`.
 - Golden inventory freshness: re-run gate-selftest and `npm run build` before trusting the table.

@@ -84,6 +84,11 @@ export default function Admin() {
     if (data.ok) {
       const sentTo = data.recipients.map((r) => r.email).join(", ");
       let msg = `Created ${data.count} separate link${data.count !== 1 ? "s" : ""}; emailed ${sentTo}`;
+      const bundleLines = data.recipients
+        .filter((r) => r.bundleLink)
+        .map((r) => `${r.email}: ${r.bundleLink}`)
+        .join(" | ");
+      if (bundleLines) msg += ` — Bundle pages: ${bundleLines}`;
       if (data.failures) {
         msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (links created, email not sent — see Resend in the table below)`;
       }
