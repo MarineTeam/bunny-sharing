@@ -1,9 +1,9 @@
-import { useState } from "react";
-import { kvGet } from "../../lib/kv";
+import { useEffect, useRef, useState } from "react";
+import { kvGet, kvSet } from "../../lib/kv";
 import { generateEmbedUrl } from "../../lib/bunny";
 import { signGrant, verifyGrant } from "../../lib/gate";
 
-export default function WatchPage({ status, reason, embedUrl, title, token, notice }) {
+export default function WatchPage({ status, reason, embedUrl, title, token, notice, trackAuth }) {
   if (status === "invalid") {
     return (
       <div style={styles.wrap}>
@@ -14,23 +14,107 @@ export default function WatchPage({ status, reason, embedUrl, title, token, noti
   }
 
   if (status === "authorized") {
-    return (
-      <div style={styles.wrap}>
-        <h2>{title}</h2>
-        <div style={styles.playerBox}>
-          <iframe
-            src={embedUrl}
-            loading="lazy"
-            style={styles.iframe}
-            allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
-            allowFullScreen
-          />
-        </div>
-      </div>
-    );
+    return <Player embedUrl={embedUrl} title={title} token={token} trackAuth={trackAuth} />;
   }
 
   return <EmailGate token={token} title={title} notice={notice} />;
+}
+
+function Player({ embedUrl, title, token, trackAuth }) {
+  const iframeRef = useRef(null);
+
+  // Playback tracking via the Player.js postMessage protocol, which the Bunny
+  // embed player speaks. Reports: first play, 25/50/75% progress milestones,
+  // and completion. Fire-and-forget — tracking failures never affect playback.
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !trackAuth) return;
+
+    let played = false;
+    const milestones = new Set();
+
+    function send(msg) {
+      try {
+        iframe.contentWindow.postMessage(
+          JSON.stringify({ context: "player.js", version: "0.0.11", ...msg }),
+          "*"
+        );
+      } catch {}
+    }
+
+    function subscribe() {
+      for (const ev of ["play", "timeupdate", "ended"]) {
+        send({ method: "addEventListener", value: ev });
+      }
+    }
+
+    function track(event, progressPct) {
+      fetch("/api/watch/track", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, auth: trackAuth, event, progressPct }),
+        keepalive: true,
+      }).catch(() => {});
+    }
+
+    function onMessage(e) {
+      if (e.source !== iframe.contentWindow) return;
+      let d = e.data;
+      if (typeof d === "string") {
+        try {
+          d = JSON.parse(d);
+        } catch {
+          return;
+        }
+      }
+      if (!d || d.context !== "player.js") return;
+
+      if (d.event === "ready") subscribe();
+      if (d.event === "play" && !played) {
+        played = true;
+        track("play");
+      }
+      if (d.event === "timeupdate" && d.value && d.value.duration > 0) {
+        const pct = Math.floor((d.value.seconds / d.value.duration) * 100);
+        for (const m of [25, 50, 75]) {
+          if (pct >= m && !milestones.has(m)) {
+            milestones.add(m);
+            track("progress", m);
+          }
+        }
+      }
+      if (d.event === "ended" && !milestones.has(100)) {
+        milestones.add(100);
+        track("ended", 100);
+      }
+    }
+
+    window.addEventListener("message", onMessage);
+    // Subscribe on load too, in case the player's "ready" fired before our
+    // listener attached. Duplicate subscriptions are harmless (flags above
+    // dedupe our reports).
+    iframe.addEventListener("load", subscribe);
+    return () => {
+      window.removeEventListener("message", onMessage);
+      iframe.removeEventListener("load", subscribe);
+    };
+  }, [token, trackAuth]);
+
+  return (
+    <div style={styles.wrap}>
+      <h2>{title}</h2>
+      <div style={styles.playerBox}>
+        <iframe
+          ref={iframeRef}
+          src={embedUrl}
+          loading="lazy"
+          style={styles.iframe}
+          allow="accelerometer;gyroscope;autoplay;encrypted-media;picture-in-picture;"
+          allowFullScreen
+        />
+      </div>
+    </div>
+  );
 }
 
 function EmailGate({ token, title, notice }) {
@@ -168,8 +252,31 @@ export async function getServerSideProps({ params, query, req, res }) {
   const cookies = parseCookies(req.headers.cookie);
   const existing = verifyGrant(cookies[cookieName(token)], { token });
   if (existing) {
+    // View tracking: additive fields only, so records created before this
+    // feature keep working untouched. Counted per authorized page render —
+    // never for the email form. Last-writer-wins on concurrent views is
+    // acceptable at this scale.
+    const now = Date.now();
+    await kvSet(`bunnyshare:${token}`, {
+      ...record,
+      viewCount: (record.viewCount || 0) + 1,
+      firstViewedAt: record.firstViewedAt || now,
+      lastViewedAt: now,
+    });
+
     const embedUrl = generateEmbedUrl(record.videoId, 3600);
-    return { props: { status: "authorized", embedUrl, title: record.videoTitle } };
+
+    // Short-lived tracking grant for the playback-event reporter: the gate
+    // cookie is Path-scoped to this page and HttpOnly, so client JS can't
+    // present it to /api/watch/track. This grant is token-bound and capped
+    // at 6 h (or share expiry, whichever is sooner).
+    const trackAuth = signGrant({
+      token,
+      email: record.email,
+      expiresAt: Math.min(record.expiresAt, Date.now() + 6 * 3600 * 1000),
+    });
+
+    return { props: { status: "authorized", embedUrl, title: record.videoTitle, token, trackAuth } };
   }
 
   // 3. No grant yet — ask for the email.

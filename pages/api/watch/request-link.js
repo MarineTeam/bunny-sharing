@@ -35,7 +35,17 @@ export default async function handler(req, res) {
       return genericOk();
     }
 
-    if (normalizeEmail(email) !== normalizeEmail(record.email)) {
+    // Match the typed address against the record's email. Records are written
+    // with exactly one address per record, but records created by older code
+    // could store a comma/space-joined string of several addresses — split
+    // and match any of them, so those legacy records still gate correctly.
+    // The magic link goes to the TYPED (matched) address only.
+    const storedRecipients = String(record.email || "")
+      .split(/[,;\s]+/)
+      .map(normalizeEmail)
+      .filter(Boolean);
+    const typed = normalizeEmail(email);
+    if (!storedRecipients.includes(typed)) {
       return genericOk();
     }
 
@@ -49,12 +59,15 @@ export default async function handler(req, res) {
 
     const grant = signGrant({
       token,
-      email: record.email,
+      email: typed,
       expiresAt: Date.now() + MAGIC_LINK_TTL_MS,
     });
     const link = `${baseUrl(req)}/watch/${token}?grant=${encodeURIComponent(grant)}`;
 
-    await sendMagicLinkEmail({ to: record.email, videoTitle: record.videoTitle, link });
+    // Send to the matched typed address, never record.email verbatim — a
+    // legacy combined-string record would otherwise email every address in
+    // the string at once.
+    await sendMagicLinkEmail({ to: typed, videoTitle: record.videoTitle, link });
 
     return genericOk();
   } catch (err) {
