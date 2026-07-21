@@ -63,6 +63,7 @@ Jargon, once:
 | Bundle magic link exchanges fine but individual videos still show the email form | Check the exchange response's `Set-Cookie` headers — should be ONE `gate_bundle_<id>` PLUS one `gate_<token>` per member in the SAME response | Cookies not applied by the client (multiple `Set-Cookie` headers dropped by a proxy/test tool that only keeps the last one — real browsers handle this fine); or a member's own `bunnyshare:<token>` record was already revoked/expired at exchange time, which correctly skips minting that one cookie (pages/bundle/[bundleId].js) | S7 |
 | `/api/share/extend` returns `"Cannot extend a revoked share"` | `kv-inspect` the record's `revoked` field | Working as intended — extend deliberately refuses revoked records rather than doubling as an un-revoke (pages/api/share/extend.js, added 2026-07-21). There is no endpoint that un-revokes; that would need a new, separate action | S1-S7 (n/a) |
 | Extended share's new `expiresAt` looks wrong (too soon/too far) | Was the share already expired at extend time? | Extend computes `Math.max(Date.now(), record.expiresAt) + hours*3600*1000` (pages/api/share/extend.js) — an ALREADY-EXPIRED share extends from now, not from its old (past) expiry; a NOT-YET-expired share extends from its current expiry. Confirm which branch applied before assuming a bug | S1-S7 (n/a) |
+| Bulk revoke reports a "success" for a token you expected to already be revoked | Check the record's `revoked` field before AND after | Working as intended — `revokeOne` (pages/api/revoke.js, refactored 2026-07-21 for bulk) is idempotent by design: revoking an already-revoked record is a no-op success, not a failure, so a batch that happens to include one is never spuriously flagged | S1-S7 (n/a) |
 
 ## S1 — Playback and thumbnails
 
@@ -394,7 +395,7 @@ bug; if they match, this is the intended consolidation.
 
 ## Provenance and maintenance
 
-Written 2026-07-18 against branch `claude/bulk-share-separate-links-auth-cblrle` @ 5905bba; every cited line was read in that tree and the build warning + no-env build were reproduced the same day. S7 and the bundle-related table rows added 2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`/`pages/api/bundle/request-link.js`, verified live against a mock KV + mock SMTP. The consolidation callout ("why does this email include a video I didn't just share") added same day when `findOrExtendBundle` widened bundles to one-per-email. Re-verify before trusting drifted facts:
+Written 2026-07-18 against branch `claude/bulk-share-separate-links-auth-cblrle` @ 5905bba; every cited line was read in that tree and the build warning + no-env build were reproduced the same day. S7 and the bundle-related table rows added 2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`/`pages/api/bundle/request-link.js`, verified live against a mock KV + mock SMTP. The consolidation callout ("why does this email include a video I didn't just share") added same day when `findOrExtendBundle` widened bundles to one-per-email. Extend and bulk-revoke rows added 2026-07-21. Re-verify before trusting drifted facts:
 
 ```bash
 git log --oneline -1                                          # still near 5905bba (plus later commits)?

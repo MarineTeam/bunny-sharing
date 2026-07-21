@@ -284,16 +284,24 @@ suggestions; they are the reasons the system is safe and simple.
 ### 2.8 Revoke = flag; cleanup = the only deleter
 
 - **Decision**: `/api/revoke` sets `record.revoked = true` and writes the
-  record back — never deletes (`pages/api/revoke.js:12-13`). `/api/cleanup`
-  is the only code path that deletes, and only records that are
-  `revoked || expired` (`pages/api/cleanup.js:9-13`).
+  record back — never deletes (`revokeOne`, `pages/api/revoke.js`).
+  `/api/cleanup` is the only code path that deletes, and only records that
+  are `revoked || expired` (`pages/api/cleanup.js:9-13`). `revokeOne` is
+  idempotent: revoking an already-revoked record is a no-op success, not an
+  error — the end state is identical either way. `/api/revoke-bulk` (added
+  2026-07-21) applies `revokeOne` to a list of tokens, reporting
+  `{succeeded, failures}` per token — same never-fail-the-whole-batch
+  pattern as `resend-bulk`/`extend-bulk`.
 - **Why**: Revocation stays reversible (flip the flag back by hand) and
   auditable (the record still shows who had access to what until cleanup
   runs). Separating "deny access" from "destroy evidence" means a fat-finger
   revoke is recoverable.
 - **What breaks**: Making revoke delete destroys the audit trail and
   reversibility. Making cleanup delete non-expired, non-revoked records
-  breaks live links (invariant 1).
+  breaks live links (invariant 1). Making `revokeOne` error on an
+  already-revoked record would make bulk revoke fragile — a batch containing
+  one already-revoked token should still succeed for that token, not report
+  a spurious failure.
 
 ### 2.8a Extend = mutate `expiresAt` in place; revoked blocks it (added 2026-07-21)
 
@@ -564,7 +572,9 @@ follow-up entry for the observation log. Section 2.8a added 2026-07-21 for
 the expiry-extend feature (`pages/api/share/extend.js`,
 `pages/api/share/extend-bulk.js`, `extendBundleForToken` in
 `lib/bundles.js`), verified live against the same mock KV/SMTP harness — see
-bunny-sharing-roadmap item i.
+bunny-sharing-roadmap item i. Section 2.8 updated 2026-07-21 for bulk revoke
+(`pages/api/revoke-bulk.js`, `revokeOne` exported from `pages/api/revoke.js`)
+— see bunny-sharing-roadmap item j.
 
 Re-verify volatile facts before trusting them:
 
@@ -582,6 +592,7 @@ grep -n "gate_bundle_\|Path=/bundle" "pages/bundle/[bundleId].js"               
 grep -n "findOrExtendBundle" lib/bundles.js pages/api/share.js pages/api/share-bulk.js  # one-bundle-per-email widening
 grep -n "extendOne\|Cannot extend a revoked" pages/api/share/extend.js         # section 2.8a
 grep -n "extendBundleForToken" lib/bundles.js pages/api/share/extend.js        # bundle expiry propagation
+grep -n "revokeOne" pages/api/revoke.js pages/api/revoke-bulk.js               # section 2.8 bulk revoke
 ```
 
 If any grep comes back changed or empty, the contract has drifted: read the

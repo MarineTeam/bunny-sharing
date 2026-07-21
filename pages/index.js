@@ -15,6 +15,7 @@ export default function Admin() {
   const [selectedShares, setSelectedShares] = useState(() => new Set());
   const [resendingBulk, setResendingBulk] = useState(false);
   const [extendingBulk, setExtendingBulk] = useState(false);
+  const [revokingBulk, setRevokingBulk] = useState(false);
 
   function toggleSelected(id) {
     setSelected((prev) => {
@@ -219,6 +220,32 @@ export default function Admin() {
     }
   }
 
+  async function revokeSelected() {
+    const tokens = [...selectedShares];
+    if (tokens.length === 0) return;
+    if (!confirm(`Revoke ${tokens.length} access link${tokens.length !== 1 ? "s" : ""}?`)) return;
+    setRevokingBulk(true);
+    setMessage(`Revoking ${tokens.length} link${tokens.length !== 1 ? "s" : ""}...`);
+    const res = await fetch("/api/revoke-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens }),
+    });
+    const data = await res.json();
+    setRevokingBulk(false);
+    if (data.ok) {
+      let msg = `Revoked ${data.succeeded.length} of ${tokens.length}`;
+      if (data.failures.length > 0) {
+        msg += ` — FAILED for ${data.failures.length}: ${data.failures.map((f) => f.error).join("; ")}`;
+      }
+      setMessage(msg);
+      setSelectedShares(new Set());
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
   function statusOf(s) {
     if (s.revoked) return "Revoked";
     if (Date.now() > s.expiresAt) return "Expired";
@@ -333,6 +360,9 @@ export default function Admin() {
           </button>
           <button onClick={extendSelected} disabled={extendingBulk} style={styles.btn}>
             {extendingBulk ? "Extending..." : `Extend ${selectedShares.size}`}
+          </button>
+          <button onClick={revokeSelected} disabled={revokingBulk} style={styles.btnDanger}>
+            {revokingBulk ? "Revoking..." : `Revoke ${selectedShares.size}`}
           </button>
           <button onClick={() => setSelectedShares(new Set())} style={styles.btnSecondary}>
             Clear
