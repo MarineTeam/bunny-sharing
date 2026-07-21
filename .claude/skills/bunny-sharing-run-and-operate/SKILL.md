@@ -47,7 +47,7 @@ scripts exist.
 
 ### Expected build output (as of 2026-07-21, next 16.2.10)
 
-A healthy build prints this exact route manifest — 16 routes plus the
+A healthy build prints this exact route manifest — 17 routes plus the
 middleware line:
 
 ```
@@ -57,6 +57,7 @@ Route (pages)
 ├ ƒ /api/bundle/request-link
 ├ ƒ /api/cleanup
 ├ ƒ /api/revoke
+├ ƒ /api/revoke-bulk
 ├ ƒ /api/share
 ├ ƒ /api/share-bulk
 ├ ƒ /api/share/extend
@@ -159,9 +160,13 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    `statusOf` (pages/index.js:112-116): `revoked` → "Revoked",
    `Date.now() > expiresAt` → "Expired", else "Active".
 6. **Revoke** — the Revoke button (only shown for Active rows) confirms then
-   `POST /api/revoke` with `{token}`. Server side sets `revoked: true` on the
-   record and writes it back — a flag flip, never a delete (invariant:
-   reversible/auditable).
+   `POST /api/revoke` with `{token}`. Server side (`revokeOne`,
+   `pages/api/revoke.js`) sets `revoked: true` on the record and writes it
+   back — a flag flip, never a delete (invariant: reversible/auditable);
+   idempotent, so revoking an already-revoked record is a no-op success.
+   Bulk form (added 2026-07-21, same select-checkboxes as bulk Resend/Extend
+   above): "Revoke N" in the bulk bar → `POST /api/revoke-bulk` with
+   `{tokens: [...]}` → `{succeeded, failures}` per token.
 6a. **Extend** (added 2026-07-21) — the Extend button appears on every
    non-revoked row, Active OR Expired (unlike Revoke/Resend, which stay
    Active-only — extending an already-expired-but-not-revoked share is the
@@ -349,6 +354,21 @@ token. Effect is immediate: the `/watch` page checks `record.revoked` on
 every request, so even a recipient holding a valid cookie is blocked on next
 load. Revoke does not delete the record (reversible by design — flipping the
 flag back via KV restores access, though no endpoint does that today).
+Idempotent: revoking an already-revoked token returns `{"ok":true}` again,
+not an error.
+
+Bulk form (added 2026-07-21): UI same select-checkboxes as bulk
+Resend/Extend, "Revoke N" button in the bulk bar. Or:
+
+```bash
+curl -u "$ADMIN_USER:$ADMIN_PASS" -X POST "$SITE/api/revoke-bulk" \
+  -H "Content-Type: application/json" \
+  -d '{"tokens":["<t1>","<t2>",...]}'
+```
+
+`{"succeeded":["<t1>",...],"failures":[{"token","error"}...]}` — one
+nonexistent or already-revoked token never blocks the rest (already-revoked
+counts as `succeeded`, not a failure).
 
 ### Extend a share's expiry (added 2026-07-21)
 
@@ -471,14 +491,16 @@ manifest, cleanup, bulk-share, and bundle (2c) sections were updated
 updated again same day when bundles widened to one-per-email
 (`findOrExtendBundle`) and `/api/share.js` started participating too. Item
 6a and the "Extend a share's expiry" runbook section added 2026-07-21 for
-`pages/api/share/extend.js`/`extend-bulk.js`.
+`pages/api/share/extend.js`/`extend-bulk.js`. Item 6's bulk-revoke text and
+"Revoke a share" runbook's bulk section added same day for
+`pages/api/revoke-bulk.js`.
 Re-verify
 before trusting, in one line each:
 
 | Claim | Re-verify with |
 | --- | --- |
 | npm scripts are exactly dev/build/start | `cat package.json` |
-| Route manifest (16 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
+| Route manifest (17 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
 | Build needs no env vars | `env -i PATH="$PATH" HOME="$HOME" npm run build` in a checkout with no `.env.local` |
 | Basic Auth matcher / public routes | `cat middleware.js` (matcher at bottom, expect `(?!watch/\|bundle/)`) |
 | Share record fields + key prefix | `grep -n "bunnyshare" lib/shares.js pages/api/*.js pages/watch/*.js` and read `createShareRecord` in `lib/shares.js` |

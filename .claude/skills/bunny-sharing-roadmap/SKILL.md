@@ -293,6 +293,36 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   separate, explicit, and more carefully considered action if it's ever
   added.
 
+### (j) Bulk revoke — ADOPTED 2026-07-21
+- **Was:** Revoke only existed as a single-token action; an admin wanting to
+  cut off several shares at once (e.g. an entire batch shared to the wrong
+  address) had to click Revoke once per row.
+- **What shipped:** `revokeOne(token)` (exported from `pages/api/revoke.js`)
+  extracted the existing single-revoke logic and made it explicitly
+  idempotent — revoking an already-revoked record is a no-op success, not an
+  error, so a batch containing one already-revoked token doesn't spuriously
+  fail. `pages/api/revoke-bulk.js` applies `revokeOne` to
+  `{tokens: [...]}`, reporting `{succeeded, failures}` per token — same
+  never-fail-the-whole-batch pattern as `resend-bulk`/`extend-bulk`. Admin
+  UI: the existing multi-select checkboxes (shared with bulk Resend/Extend,
+  visible on any non-revoked row) gained a "Revoke N" button (danger-styled,
+  with the same `confirm()` guard the single-row Revoke button already uses)
+  in the same bulk bar.
+- **Verified:** L0 (`npm run build` clean, route registered) + a live L2/L3
+  pass against the mock KV/SMTP harness: bulk-revoked 2 of 3 created shares
+  in one call alongside 1 nonexistent token → both valid ones flipped to
+  `revoked: true`, the third untouched, the bogus one reported as a clean
+  `"Share not found"` failure; re-revoking an already-revoked token in a
+  second bulk call succeeded (no error) proving idempotency; the pre-existing
+  single-token `/api/revoke` endpoint's behavior (200 on success, 404 for an
+  unknown token) was unaffected by the refactor. Middleware boundary
+  re-checked: `/api/revoke-bulk` 401s without admin creds.
+- **Not yet exercised:** production deploy. Bulk revoke was NOT extended to
+  also un-revoke (select revoked rows and restore them) — that's a
+  meaningfully different, riskier action (silently restoring access someone
+  deliberately cut off) and was left out of scope on purpose, same reasoning
+  as item i's decision not to let Extend double as an undo for Revoke.
+
 ## 3. Positioning: standard vs actually nice
 
 Standard practice, competently applied (claim nothing): magic links, HMAC-SHA256
