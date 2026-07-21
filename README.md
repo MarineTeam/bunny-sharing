@@ -2,11 +2,16 @@
 
 A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/stream/) videos with people outside your organization via time-limited, revocable links — without giving them access to your Bunny library.
 
+See [FEATURES.md](./FEATURES.md) for the full feature list and [CHANGELOG.md](./CHANGELOG.md) for what changed and when.
+
 ## How it works
 
 - The admin page (`/`) is protected with HTTP Basic Auth and lists videos from your Bunny Stream library.
-- From there you generate a share: pick a video, enter a recipient email and an expiry window, and the app emails them a link like `/watch/<token>`. You can also **select multiple videos and bulk-share them to multiple recipients at once** — every recipient × video pair gets its own separate, independently revocable link, and each recipient receives one email listing only their own links. Views are tracked per link (count + last viewed), and real playback is tracked via the Bunny player's events (plays, furthest progress %, completed) so you can see who actually watched — not just who opened the page.
+- From there you generate a share: pick a video, enter a recipient email and an expiry window, and the app emails them a link like `/watch/<token>`. You can also **select multiple videos and bulk-share them to multiple recipients at once** — every recipient × video pair gets its own separate, independently revocable link, and each recipient receives one email listing only their own links. Repeat shares to the **same email address** (single or bulk, in any order) fold into that recipient's existing bundle and consolidate into one email, rather than sending a new standalone notification every time.
+- Every recipient with more than one active share also gets a **bundle page** — one gated link listing everything shared with them. Verifying once unlocks the whole bundle (every video plays without a second email round-trip), while each video still independently enforces its own revoke/expiry.
+- Views are tracked per link (count + last viewed), and real playback is tracked via the Bunny player's events (plays, furthest progress %, completed) so you can see who actually watched — not just who opened the page.
 - The `/watch/[token]` page is public (not behind Basic Auth) so recipients can open it directly. It's **email-gated**: the recipient must enter the address the link was shared with, and only if it matches does the app email them a one-time "magic link". Clicking that link sets a signed, link-scoped cookie and plays the video. Possessing the share URL alone is not enough — you also have to control the inbox it was sent to. Links that are revoked or expired never render.
+- The admin table supports **Resend, Extend, and Revoke** per link, each also available as a bulk action across multiple selected links at once. Extending a share gives a recipient more time without changing their link; resend re-sends the notification on demand (not just after a delivery failure); revoke is idempotent and reversible-by-flag (never deletes the record).
 - Share records (token, video, recipient, expiry, revoked flag) are stored in Upstash Redis via the REST API.
 - Expired/revoked shares can be purged with a cleanup endpoint, suitable for a scheduled job.
 
@@ -55,15 +60,21 @@ A small Next.js app for sharing private [Bunny.net Stream](https://bunny.net/str
 | Route | Method | Purpose |
 | --- | --- | --- |
 | `/api/videos` | GET | List videos from the Bunny library |
-| `/api/share` | POST | Create a share link and email it to a recipient |
-| `/api/share-bulk` | POST | Create a separate link per recipient × video pair; each recipient gets one email listing only their own links |
+| `/api/share` | POST | Create a share link and email it to a recipient. Folds into the recipient's existing bundle (see below) if they already have one. |
+| `/api/share-bulk` | POST | Create a separate link per recipient × video pair; each recipient gets one email listing everything currently active for them |
 | `/api/shares` | GET | List all share records (for the admin table) |
-| `/api/revoke` | POST | Revoke a share by token |
-| `/api/cleanup` | POST | Delete expired or revoked share records |
+| `/api/revoke` | POST | Revoke a share by token. Idempotent. |
+| `/api/revoke-bulk` | POST | Revoke multiple shares by token in one call; reports success/failure per token |
+| `/api/share/resend` | POST | Re-send a share's notification email on demand, for any active share (not only ones that previously failed) |
+| `/api/share/resend-bulk` | POST | Resend for multiple shares in one call; reports success/failure per token |
+| `/api/share/extend` | POST | Extend a share's expiry in place (`{token, hours}`) — same link, longer validity. Works on an already-expired (not revoked) share. Refuses revoked shares. |
+| `/api/share/extend-bulk` | POST | Extend multiple shares in one call; reports success/failure per token |
+| `/api/cleanup` | POST | Delete expired or revoked share and bundle records |
 | `/api/watch/request-link` | POST | Public: verify a recipient's email against a share and email them a one-time magic link (excluded from admin Basic Auth) |
 | `/api/watch/track` | POST | Public: record playback events (play/progress/ended) reported by the player; requires a token-bound tracking grant issued by the authorized watch page |
+| `/api/bundle/request-link` | POST | Public: verify a recipient's email against their bundle and email them a one-time magic link that unlocks every video in it |
 
-All routes except `/watch/[token]` are protected by the Basic Auth middleware.
+`/watch/[token]` and `/bundle/[bundleId]` are the two public, recipient-facing pages — neither is behind Basic Auth. Every other route is protected by the Basic Auth middleware.
 
 ## Deployment
 
