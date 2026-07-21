@@ -46,7 +46,7 @@ scripts exist.
 
 ### Expected build output (as of 2026-07-20, next 16.2.10)
 
-A healthy build prints this exact route manifest — 13 routes plus the
+A healthy build prints this exact route manifest — 14 routes plus the
 middleware line:
 
 ```
@@ -59,6 +59,7 @@ Route (pages)
 ├ ƒ /api/share
 ├ ƒ /api/share-bulk
 ├ ƒ /api/share/resend
+├ ƒ /api/share/resend-bulk
 ├ ƒ /api/shares
 ├ ƒ /api/videos
 ├ ƒ /api/watch/request-link
@@ -112,8 +113,13 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    `<site>/watch/<token>`. The record is stored BEFORE the email is sent, so
    a send failure still leaves a live share record — as of 2026-07-20 this
    is flagged (`emailFailed`/`emailError`, shown as "⚠ email failed" in the
-   shares table) rather than being a silent ghost, and an admin-only Resend
-   button (`/api/share/resend`) re-sends and clears the flag.
+   shares table) rather than being a silent ghost. The Resend button
+   (`/api/share/resend`, exporting `resendOne`) works on ANY active share, not
+   only flagged ones — an admin can nudge a recipient who says they never got
+   an email even if nothing failed — and clears the flag on success. Shares
+   table rows also have select checkboxes and a "Resend N" bulk bar
+   (`/api/share/resend-bulk`, `{tokens: [...]}` → `{succeeded, failures}`,
+   never fails the whole selection on one bad token).
 4. **Bulk share** — tick Select checkboxes on 2+ cards → a bulk bar appears
    with an emails field (comma/space/semicolon-separated, one or more) and
    ONE hours field → `POST /api/share-bulk` with
@@ -410,7 +416,7 @@ before trusting, in one line each:
 | Claim | Re-verify with |
 | --- | --- |
 | npm scripts are exactly dev/build/start | `cat package.json` |
-| Route manifest (13 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
+| Route manifest (14 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
 | Build needs no env vars | `env -i PATH="$PATH" HOME="$HOME" npm run build` in a checkout with no `.env.local` |
 | Basic Auth matcher / public routes | `cat middleware.js` (matcher at bottom, expect `(?!watch/\|bundle/)`) |
 | Share record fields + key prefix | `grep -n "bunnyshare" lib/shares.js pages/api/*.js pages/watch/*.js` and read `createShareRecord` in `lib/shares.js` |

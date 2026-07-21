@@ -140,6 +140,22 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   failure was simulated) — the `deliver()` chokepoint means the same
   flag/resend path applies, but if Resend's SDK throws a differently-shaped
   error, `err.message` could read oddly in `emailError`. Low risk, unverified.
+- **Follow-up 2026-07-20 (same day):** resend was generalized beyond
+  failure-recovery. `resendOne` (exported from `pages/api/share/resend.js`)
+  is no longer gated on `emailFailed` — any active share can be re-sent on
+  demand (e.g. a recipient says they never got it, even though nothing was
+  flagged). New `pages/api/share/resend-bulk.js` accepts `{tokens: [...]}`
+  and resends each independently via the same `resendOne`, reporting
+  `{succeeded: [...], failures: [...]}` — never fails the whole batch on one
+  bad token. `pages/index.js` now shows a Resend button on EVERY active
+  share row (not just flagged ones) plus row checkboxes and a "Resend N"
+  bulk bar above the shares table, mirroring the existing video-selection
+  bulk-share bar's pattern. Verified live (same mock KV/SMTP harness):
+  resend succeeded on a share that never had `emailFailed` set; bulk resend
+  of 3 valid tokens + 1 nonexistent token returned all 3 successes plus one
+  `{error: "Share not found"}` failure without affecting the others;
+  revoking a token mid-batch correctly produced `{error: "Share is revoked
+  or expired"}` for that token only; both endpoints 401 without admin creds.
 
 ### (g) Automated tests
 - Owned by bunny-sharing-validation-and-qa §4 (candidate `node --test` plan).
