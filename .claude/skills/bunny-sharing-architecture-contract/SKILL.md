@@ -183,7 +183,7 @@ suggestions; they are the reasons the system is safe and simple.
   — mixing the two schemes was a real incident (`65dc992`); the signing math
   lives in bunny-stream-reference.
 
-### 2.6 Bulk = M×N independent records; no bundle entity
+### 2.6 Bulk = M×N independent records; bundle is a pure grouping list, never a second source of truth
 
 - **Decision**: `/api/share-bulk` accepts multiple recipients (`emails`
   array; legacy single `email` still accepted) and loops `createShareRecord`
@@ -193,30 +193,93 @@ suggestions; they are the reasons the system is safe and simple.
   all-invalid input is a 400; a per-recipient email failure is reported in
   the response (`failures`) without failing other recipients.
 - **Why**: Independent revocation per person per video, per-person view
-  tracking (section 5.1 view fields), and zero new schema. The **only**
-  grouping that exists is each email itself; there is no "bundle" key, id,
-  or record anywhere in KV.
-- **What breaks**: Introducing a bundle entity adds a second source of truth
-  and a migration risk to `bunnyshare:*` (invariant 1). Any feature that
-  assumes shares created together can be found together will find nothing —
-  do not "discover" a bundle relation; it does not exist.
+  tracking (section 5.1 view fields), and zero new schema for the shares
+  themselves. Revoking or letting one member expire never touches any other
+  record.
+- **Bundle addition (2026-07-20 — see section 5.1a):** every `share-bulk`
+  call, and every `share.js` call too (widened same day — see below),
+  creates or extends one `bunnybundle:<id>` record per recipient
+  (`lib/bundles.js`), listing that recipient's member tokens, and a
+  `/bundle/<id>` gated page (`pages/bundle/[bundleId].js`) that lists them.
+  The bundle record holds ONLY the token list, email, and its own
+  `createdAt`/`expiresAt` (max of members) — it never stores a member's
+  title, revoked flag, or status. `getBundleMembers` (`lib/bundles.js`)
+  always re-reads each `bunnyshare:<token>` live, so the bundle page can
+  never show stale status; there is exactly one source of truth for a
+  share's state (invariant 1 still holds).
+- **One bundle per email, not per call (widened same day):**
+  `findOrExtendBundle` (`lib/bundles.js`) looks for an existing, still-active
+  bundle whose `email` matches (normalized) before creating a new one. If
+  found, it appends the new members' tokens and extends `expiresAt` to the
+  later of the two — so a recipient shared with across several separate
+  admin actions (single share today, bulk share next week) keeps exactly ONE
+  bundle page/link for their entire relationship with this deployment,
+  rather than accumulating a new bundle every time. If NOT found (first time
+  this email has ever been shared with, or their prior bundle expired), it
+  also sweeps in any other still-active `bunnyshare:*` records for that
+  email not already claimed by another bundle (e.g. single-video shares made
+  before this widening existed) — so the first bundle for someone reflects
+  everything currently shared with them, not just what's new. `/api/share.js`
+  now always calls this too: a recipient's first share still gets the plain
+  single-video email (`sendShareEmail`), but the moment they have more than
+  one active share (from ANY endpoint, in ANY order), every subsequent
+  notification uses `getBundleItems` to build ONE consolidated email
+  (`sendBulkShareEmail`) listing everything currently active for them,
+  instead of firing a new standalone email per share. This is a policy
+  choice, not a security property: the effect is "recipient's active shares
+  converge to one bundle and one running conversation," which is what was
+  asked for ("if they are the same email, they should be in the same
+  email").
+- **Bundle gate is a second application of the same mechanism, not a bypass**:
+  the bundle page is gated by the identical stateless-HMAC magic-link
+  mechanism (section 2.2), scoped to a `bundle:<id>` pseudo-token that can
+  never collide with a real 32-hex video token. The one difference from a
+  single-video gate: on successful verification, the exchange mints not only
+  a `gate_bundle_<id>` cookie (Path=`/bundle/<id>`) but also a `gate_<token>`
+  cookie for EVERY member (Path=`/watch/<token>`, same format the per-video
+  gate already produces) — this is the bundle's actual value (one
+  verification, not N), and it works by minting standard per-video cookies,
+  not by changing what `/watch/[token].js` accepts. Every video still
+  independently re-checks `revoked`/`expiresAt` on every render regardless of
+  cookie presence (section 2.4/2.5) — a bundle cookie shortcuts the email
+  round-trip, never the live status check.
+- **What breaks**: Treating the bundle record as authoritative for a
+  member's status (instead of re-reading `bunnyshare:<token>`) reintroduces
+  the second-source-of-truth risk this design deliberately avoids. Any code
+  path that reads `bundle.tokens` and does NOT re-fetch each `bunnyshare:`
+  record before showing title/status is wrong. `findOrExtendBundle` does a
+  full `KEYS bunnybundle:*` AND `KEYS bunnyshare:*` scan on every call where
+  no active bundle is found yet for that email (the orphan sweep) — extends
+  the KEYS-scan performance profile (roadmap item a) to `/api/share.js` too,
+  not just admin listing/cleanup; accepted at current scale, revisit
+  together. Also note: if a recipient already unlocked a bundle (has a valid
+  `gate_bundle_<id>` cookie) and a NEW share is later folded into that same
+  bundle, the new video appears in the listing immediately but has no
+  per-video `gate_<token>` cookie yet — no per-video cookies are minted
+  outside a fresh grant exchange (section 2.3/5.2), so clicking it correctly
+  falls back to that video's own email gate. Graceful degradation, not a
+  bug.
 
 ### 2.7 Middleware negative-lookahead matcher is the sole admin auth boundary
 
 - **Decision**: `middleware.js` applies HTTP Basic Auth
   (`ADMIN_USER`/`ADMIN_PASS`) with matcher
-  `["/", "/api/((?!watch/).*)"]` (`middleware.js:29-32`). That single regex
-  is the entire admin/public split: `/` and every `/api/*` route are
-  protected **except** `/api/watch/*`; `/watch/*` pages are never matched at
-  all.
+  `["/", "/api/((?!watch/|bundle/).*)"]` (`middleware.js:29-32`, widened
+  2026-07-20 to add `bundle/`). That single regex is the entire admin/public
+  split: `/` and every `/api/*` route are protected **except**
+  `/api/watch/*` and `/api/bundle/*`; `/watch/*` and `/bundle/*` pages are
+  never matched at all (Next only runs middleware on paths named in
+  `matcher`).
 - **Why**: One declarative boundary instead of per-route auth checks that
   someone will forget on the next route.
 - **What breaks**: Any new admin API route is protected automatically — but
   any new **public** route must be carved out of the matcher or it silently
   401s for recipients. Conversely, naming an admin route under `/api/watch/`
-  exposes it unauthenticated. Note (as of 2026-07-18): the Next 16 build
-  warns that the `middleware` file convention is deprecated in favor of
-  `proxy`; renaming is a behavior-affecting change — do not do it casually.
+  or `/api/bundle/` exposes it unauthenticated — those two prefixes must stay
+  recipient-only, never grow an admin sub-route. Note (as of 2026-07-18): the
+  Next 16 build warns that the `middleware` file convention is deprecated in
+  favor of `proxy`; renaming is a behavior-affecting change — do not do it
+  casually.
 
 ### 2.8 Revoke = flag; cleanup = the only deleter
 
@@ -231,6 +294,40 @@ suggestions; they are the reasons the system is safe and simple.
 - **What breaks**: Making revoke delete destroys the audit trail and
   reversibility. Making cleanup delete non-expired, non-revoked records
   breaks live links (invariant 1).
+
+### 2.8a Extend = mutate `expiresAt` in place; revoked blocks it (added 2026-07-21)
+
+- **Decision**: `/api/share/extend` (`extendOne`, exported from
+  `pages/api/share/extend.js`) takes `{token, hours}`, computes
+  `Math.max(Date.now(), record.expiresAt) + hours*3600*1000`, and writes
+  that back as the SAME record's `expiresAt` — same token, same `/watch/`
+  URL, same `gate_<token>` cookie name/scope, nothing else changes. Rejects
+  outright if `record.revoked` is true (`{error: "Cannot extend a revoked
+  share"}`); does NOT reject an already-expired-but-not-revoked share — that
+  is the primary use case ("this link died, give me a bit more time"), and
+  the `Math.max(Date.now(), ...)` base means extending a long-dead share
+  computes from now, not from a stale past timestamp that a small `hours`
+  value could leave still in the past. `/api/share/extend-bulk` applies the
+  same logic to a list of tokens independently
+  (`{succeeded: [...], failures: [...]}`, same never-fail-the-whole-batch
+  pattern as `/api/share/resend-bulk`). If the token belongs to a bundle,
+  `extendBundleForToken` (`lib/bundles.js`) re-maxes that bundle's own
+  `expiresAt` too, so the bundle listing doesn't expire before a member that
+  now legitimately outlives it (one-way: it only ever grows the bundle's
+  expiry, never shrinks it).
+- **Why**: The only prior way to give a recipient more time was revoke +
+  re-share, which mints a NEW token and breaks the existing link/bookmark —
+  directly against the never-break-live-links rule. Extending in place is
+  the compatible alternative: zero new fields, zero new KV entities, the
+  token a recipient already has keeps working, just for longer.
+- **What breaks**: Allowing extend on a REVOKED record would let this
+  endpoint silently double as an "un-revoke," undermining the admin's
+  deliberate access-denial decision (section 2.8) — that must stay a
+  separate, explicit action if it's ever added, not a side effect of
+  extending. Extend must never accept a negative or non-numeric `hours`
+  (checked: `Number.isFinite(addMs) && addMs > 0`) — a negative value would
+  let this endpoint be repurposed as a stealth-shorten, which is Revoke's
+  job and should stay visible as such.
 
 ### 2.9 `deliver()` is the single email chokepoint; provider is config, not code
 
@@ -279,7 +376,7 @@ scope decisions or unfinished hardening. "Candidate-fix" items live in
 | Magic-link grant is NOT single-use within its 15-min TTL — replayable if intercepted. Mitigated: cookie exchange + redirect strips it from URL/history | Medium | Candidate-fix (top hardening item in bunny-sharing-email-gate-campaign) |
 | Throttle is 30 s per share token only (`gatethrottle:<token>`); no per-IP rate limiting on `/api/watch/request-link` | Low-Medium (email-bombing across many tokens, or KV load) | Candidate-fix (bunny-sharing-roadmap) |
 | No tests, no linter, no CI (two scanners were added, then deleted — see bunny-sharing-failure-archaeology). Verification is manual | Medium (process risk, not runtime risk) | Candidate-fix (bunny-sharing-validation-and-qa) |
-| `share`/`share-bulk` store records BEFORE sending email; a send failure leaves a live record whose recipient never got the link | Low (admin sees the 500 and can revoke/resend) | Accepted-for-now; noted in bunny-sharing-debugging-playbook |
+| `share`/`share-bulk` store records BEFORE sending email; a send failure leaves a live record whose recipient never got the link | Low | Fixed 2026-07-20: failed sends are flagged (`emailFailed`/`emailError`, additive fields) instead of silently existing, and an admin "Resend" button re-sends and clears the flag — see section 5.1. Resend (`/api/share/resend`, `pages/api/share/resend.js` exporting `resendOne`) is not gated on `emailFailed` — any active share can be re-sent on demand, and `/api/share/resend-bulk` does the same for multiple selected shares in one call (admin selects rows via checkboxes in the shares table) |
 | The email gate has NOT been exercised against live Resend + a real inbox + prod Bunny/KV | High (unproven core flow) | Open — THE campaign: bunny-sharing-email-gate-campaign |
 | Revocation is not instant: an in-flight Bunny embed token stays valid up to 3600 s after revoke (section 2.5) | Low (bounded window, by design) | Accepted-for-now |
 | `GATE_SECRET` rotation is all-or-nothing (section 2.2) | Low (operational footgun, not a vuln) | Accepted-for-now; document before any rotation |
@@ -301,7 +398,7 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `videoTitle` | string | Display title; falls back to `videoId` if absent |
 | `email` | string | Exactly ONE recipient address per record — `parseEmails` (lib/shares.js) splits comma/semicolon/whitespace-joined input at the API boundary and both share endpoints fan out one record per address. NOT normalized at write time; the gate normalizes at compare time and (for legacy records that stored a combined string — see failure-archaeology Episode 9) matches the typed address against any address found in the stored string |
 | `createdAt` | number | Unix epoch **milliseconds** |
-| `expiresAt` | number | Unix epoch **milliseconds**: `Date.now() + (Number(hours) || 72) * 3600 * 1000` — default 72 h |
+| `expiresAt` | number | Unix epoch **milliseconds**, set at creation to `Date.now() + (Number(hours) || 72) * 3600 * 1000` (default 72 h); mutable in place by `/api/share/extend` (section 2.8a, added 2026-07-21) — `Math.max(Date.now(), current) + hours*3600*1000` — never on a revoked record |
 | `revoked` | boolean | `false` at creation; flipped to `true` by `/api/revoke`; never deleted except by `/api/cleanup` |
 | `viewCount` | number (optional) | Authorized page renders. ADDITIVE (added after 5905bba): absent on older records — read as `record.viewCount \|\| 0`, never assume present |
 | `firstViewedAt` | number (optional) | Unix ms of first authorized render; additive, may be absent |
@@ -311,6 +408,8 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `firstPlayedAt` / `lastPlayedAt` | number (optional) | Unix ms; additive |
 | `maxProgressPct` | number (optional) | Furthest playback progress 0-100, monotonic (server takes max) |
 | `completedAt` | number (optional) | Unix ms of first `ended` event; additive |
+| `emailFailed` | boolean (optional) | Set `true` by `share.js`/`share-bulk.js` when the notification email failed to send (record still created; link still live). Set via `setEmailFailed` (lib/shares.js), which stores `undefined` (dropped from JSON, not written as `false`) to clear it rather than leaving a stale flag — absence means "no known failure", not "definitely sent" |
+| `emailError` | string (optional) | The failed send's error message, for the admin table tooltip; cleared alongside `emailFailed` |
 
 View fields are written by `pages/watch/[token].js` only on the AUTHORIZED
 branch (valid cookie grant → embed render) — never for the email form or a
@@ -333,6 +432,35 @@ Auxiliary key: `gatethrottle:<token>` — value `1`, Upstash `EX=30`
 compatibility contract, but keep the name stable so in-flight throttles
 survive a deploy.
 
+### 5.1a Bundle record — KV key `bunnybundle:<bundleId>`
+
+Created in `lib/bundles.js` (`createBundleRecord`, or `findOrExtendBundle`
+which extends an existing one instead when found) by BOTH
+`pages/api/share-bulk.js` and `pages/api/share.js` (widened 2026-07-20) —
+one bundle per email that ever gets a share, kept alive and extended across
+however many separate calls touch that email, not one bundle per call.
+
+| Field | Type | Value / meaning |
+|-------|------|-----------------|
+| `id` | string | 32 lowercase hex chars — same generation as a share token, but a distinct KV namespace (`bunnybundle:`, never `bunnyshare:`) |
+| `email` | string | The one recipient this bundle belongs to, as first typed (not normalized) — `findOrExtendBundle` matches with `normalizeEmail` for lookup, but never rewrites this field on an existing bundle |
+| `tokens` | array of string | The member share tokens (`bunnyshare:<token>` keys); grows via `findOrExtendBundle` as more shares are created for this email; never shrinks (a revoked/expired member stays listed, just filtered out live by `getBundleMembers`/`getBundleItems`) |
+| `createdAt` | number | Unix epoch milliseconds — set once, at first creation, never updated on extend |
+| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` at creation; re-maxed whenever `findOrExtendBundle` adds new members (section 2.6), AND whenever `extendBundleForToken` (section 2.8a) is called after a single member's own `expiresAt` grows via `/api/share/extend` — two different call sites, same one-way-grows-only rule — the bundle listing itself is considered expired once every member would be, individually |
+
+Deliberately absent: `videoTitle`, `revoked`, any per-member status. A
+bundle is a grouping list, not a share — `getBundleMembers` (`lib/bundles.js`)
+re-fetches each `bunnyshare:<token>` on every render (see section 2.6); this
+record must never be extended with a field that duplicates something a
+member record already owns.
+
+Auxiliary key: `bundlethrottle:<bundleId>` — same shape and purpose as
+`gatethrottle:<token>` but for `/api/bundle/request-link.js`. Ephemeral.
+
+`pages/api/cleanup.js` deletes `bunnybundle:*` records once
+`Date.now() > record.expiresAt` (no `revoked` check — bundles have no such
+flag); this is the only code path that deletes them.
+
 ### 5.2 Grant string — `lib/gate.js`
 
 Format: `<body>.<sig>` where
@@ -346,16 +474,23 @@ Payload fields:
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| `t` | string | share token this grant is bound to |
+| `t` | string | share token this grant is bound to — OR, for a bundle grant, the literal string `bundle:<bundleId>` (`pages/api/bundle/request-link.js`, `pages/bundle/[bundleId].js`). `verifyGrant` does plain string equality on `t`, so a bundle grant can never verify against a real video token and vice versa — no schema change to `lib/gate.js` was needed to add bundles |
 | `e` | string | recipient email, normalized (`trim().toLowerCase()`) |
 | `x` | number | expiry, Unix epoch **milliseconds** |
 
-Two instantiations, same format:
+Four instantiations, same format:
 
-| | `x` (expiry) | Where it lives |
-|---|---|---|
-| Magic-link grant | `Date.now() + 15 min` | `?grant=` query param in the emailed link |
-| Cookie grant | `record.expiresAt` (the share's own expiry) | cookie `gate_<token>` |
+| | `t` | `x` (expiry) | Where it lives |
+|---|---|---|---|
+| Magic-link grant | `<token>` | `Date.now() + 15 min` | `?grant=` query param in the emailed link |
+| Cookie grant | `<token>` | `record.expiresAt` (the share's own expiry) | cookie `gate_<token>` |
+| Bundle magic-link grant | `bundle:<bundleId>` | `Date.now() + 15 min` | `?grant=` query param on `/bundle/<bundleId>` |
+| Bundle cookie grant | `bundle:<bundleId>` | `bundle.expiresAt` | cookie `gate_bundle_<bundleId>` |
+
+On a successful bundle grant exchange (`pages/bundle/[bundleId].js`), the
+per-video **cookie grant** row above is minted for every member token too —
+same format as a direct single-video gate exchange produces, just minted N
+times in one response instead of once (see section 2.6).
 
 Verification (`verifyGrant`, `lib/gate.js:47-66`): recompute HMAC,
 `timingSafeEqual`, reject expired (`x`), reject wrong token (`t`), never
@@ -370,12 +505,25 @@ gate_<token>=<urlencoded grant>; HttpOnly; Path=/watch/<token>; SameSite=Lax; Ma
 `Secure` is appended when `x-forwarded-proto` is https, or `SITE_URL`
 starts with `https` (`pages/watch/[token].js:146-149`).
 
+The bundle listing cookie follows the identical shape, scoped to the bundle
+path instead (`pages/bundle/[bundleId].js`):
+
+```
+gate_bundle_<bundleId>=<urlencoded grant>; HttpOnly; Path=/bundle/<bundleId>; SameSite=Lax; Max-Age=<seconds until bundle.expiresAt>[; Secure]
+```
+
+Both cookie names are distinct (`gate_` vs `gate_bundle_`) and both use
+distinct Path scopes, so there is no name or scope collision even though a
+`bundleId` and a video `token` are both 32 lowercase hex chars.
+
 ### 5.4 URL shapes
 
 | URL | Shape | Source |
 |-----|-------|--------|
 | Share link | `<baseUrl>/watch/<token>` | `lib/shares.js:28` |
 | Magic link | `<baseUrl>/watch/<token>?grant=<urlencoded grant>` | `pages/api/watch/request-link.js:55` |
+| Bundle link | `<baseUrl>/bundle/<bundleId>` | `lib/bundles.js` `createBundleRecord` |
+| Bundle magic link | `<baseUrl>/bundle/<bundleId>?grant=<urlencoded grant>` | `pages/api/bundle/request-link.js` |
 | Embed | `https://iframe.mediadelivery.net/embed/<BUNNY_LIBRARY_ID>/<videoId>?token=<sha256 hex>&expires=<unix seconds>` | `lib/bunny.js:64` |
 
 `baseUrl(req)` = `SITE_URL` if set, else `https://<host header>` — the
@@ -404,18 +552,36 @@ at commit `5905bba`, by direct reading of: `middleware.js`, `lib/gate.js`,
 `pages/watch/[token].js`, `pages/api/share.js`, `pages/api/share-bulk.js`,
 `pages/api/watch/request-link.js`, `pages/api/shares.js`,
 `pages/api/revoke.js`, `pages/api/cleanup.js`, `pages/api/videos.js`.
+Sections 2.6, 2.7, 5.1a, 5.2-5.4 updated 2026-07-20 for the bundle feature
+(`lib/bundles.js`, `pages/bundle/[bundleId].js`,
+`pages/api/bundle/request-link.js`), verified live against a mock KV + mock
+SMTP (see bunny-sharing-roadmap item h for the observation log). Section 2.6
+and 5.1a updated again same day when bundles were widened from "one per
+bulk-share call" to "one per email, extended across calls, including
+single-share" (`findOrExtendBundle`, `getBundleItems` in `lib/bundles.js`;
+`pages/api/share.js` now participates) — see bunny-sharing-roadmap item h's
+follow-up entry for the observation log. Section 2.8a added 2026-07-21 for
+the expiry-extend feature (`pages/api/share/extend.js`,
+`pages/api/share/extend-bulk.js`, `extendBundleForToken` in
+`lib/bundles.js`), verified live against the same mock KV/SMTP harness — see
+bunny-sharing-roadmap item i.
 
 Re-verify volatile facts before trusting them:
 
 ```bash
-git log --oneline -3                                  # still at/after 5905bba?
-grep -n "matcher" middleware.js                        # section 2.7 / invariant 7
+git log --oneline -3                                  # still at/after 5905bba, plus the bundle commit?
+grep -n "matcher" middleware.js                        # section 2.7 / invariant 7 — expect (?!watch/|bundle/)
 grep -n "MAGIC_LINK_TTL_MS\|THROTTLE_SECONDS" pages/api/watch/request-link.js   # section 2.3
 grep -n "randomBytes\|expiresAt\|revoked" lib/shares.js                         # section 5.1
 grep -n "b64url\|timingSafeEqual" lib/gate.js                                   # section 5.2
 grep -n "Path=/watch" "pages/watch/[token].js"                                  # section 5.3
 grep -n "generateEmbedUrl(record.videoId" "pages/watch/[token].js"              # section 2.5 (3600 s)
 grep -n "RESEND_API_KEY" lib/mailer.js                                          # section 2.9
+grep -n "bunnybundle:\|getBundleMembers" lib/bundles.js                         # section 2.6 / 5.1a
+grep -n "gate_bundle_\|Path=/bundle" "pages/bundle/[bundleId].js"               # section 5.3 bundle cookie
+grep -n "findOrExtendBundle" lib/bundles.js pages/api/share.js pages/api/share-bulk.js  # one-bundle-per-email widening
+grep -n "extendOne\|Cannot extend a revoked" pages/api/share/extend.js         # section 2.8a
+grep -n "extendBundleForToken" lib/bundles.js pages/api/share/extend.js        # bundle expiry propagation
 ```
 
 If any grep comes back changed or empty, the contract has drifted: read the

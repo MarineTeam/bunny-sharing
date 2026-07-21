@@ -1,4 +1,5 @@
-import { createShareRecord, baseUrl, parseEmails } from "../../lib/shares";
+import { createShareRecord, setEmailFailed, baseUrl, parseEmails } from "../../lib/shares";
+import { findOrExtendBundle, getBundleItems } from "../../lib/bundles";
 import { sendBulkShareEmail } from "../../lib/mailer";
 
 // Creates a separate share (distinct token + link) for every recipient x video
@@ -37,23 +38,40 @@ export default async function handler(req, res) {
           hours,
           siteUrl,
         });
-        created.push({ videoId, videoTitle: record.videoTitle, link, expiresAt: record.expiresAt });
+        created.push({ token: record.token, videoId, videoTitle: record.videoTitle, link, expiresAt: record.expiresAt });
       }
       if (created.length === 0) {
         return res.status(400).json({ error: "No valid videos to share" });
       }
 
+      // Group this recipient's tokens under one gated listing page — reusing
+      // their existing bundle if they already have one (so a recipient
+      // shared with across several separate calls keeps ONE page/link, and
+      // this call's notification folds into it instead of standing alone).
+      // The bundle record exists independent of the notification email
+      // below — it's just as valid to hand out even if the email send fails.
+      const { record: bundle, link: bundleLink } = await findOrExtendBundle({ email: to, members: created, siteUrl });
+
       try {
+        // Built from the bundle's full current membership, not just this
+        // call's `created` — a recipient with prior active shares gets ONE
+        // email listing everything currently active, not a new standalone
+        // notification for just what's new.
+        const items = await getBundleItems(bundle.tokens, siteUrl);
         await sendBulkShareEmail({
           to,
-          items: created.map((c) => ({ videoTitle: c.videoTitle, link: c.link })),
-          expiresAt: Math.max(...created.map((c) => c.expiresAt)),
+          items,
+          expiresAt: bundle.expiresAt,
+          bundleLink,
         });
-        results.push({ email: to, links: created.map((c) => ({ videoId: c.videoId, link: c.link })) });
+        results.push({ email: to, links: created.map((c) => ({ videoId: c.videoId, link: c.link })), bundleLink });
       } catch (err) {
-        // Records exist but this recipient's email failed — report it rather
+        // Records exist but this recipient's email failed — flag each one so
+        // they aren't silent ghosts in the admin table (persists past reload,
+        // unlike the one-time failures array below), and report it rather
         // than failing the whole batch (other recipients may have succeeded).
-        failures.push({ email: to, error: err.message });
+        await Promise.all(created.map((c) => setEmailFailed(c.token, true, err.message)));
+        failures.push({ email: to, error: err.message, bundleLink });
       }
     }
 

@@ -12,12 +12,24 @@ export default function Admin() {
   const [bulkEmail, setBulkEmail] = useState("");
   const [bulkHours, setBulkHours] = useState(72);
   const [bulkSending, setBulkSending] = useState(false);
+  const [selectedShares, setSelectedShares] = useState(() => new Set());
+  const [resendingBulk, setResendingBulk] = useState(false);
+  const [extendingBulk, setExtendingBulk] = useState(false);
 
   function toggleSelected(id) {
     setSelected((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleShareSelected(token) {
+    setSelectedShares((prev) => {
+      const next = new Set(prev);
+      if (next.has(token)) next.delete(token);
+      else next.add(token);
       return next;
     });
   }
@@ -51,7 +63,16 @@ export default function Admin() {
     });
     const data = await res.json();
     if (data.ok) {
-      setMessage(`Sent to ${email}`);
+      let msg = `Sent to ${email}`;
+      const bundleLines = data.links
+        .filter((l) => l.bundleLink)
+        .map((l) => `${l.email}: ${l.bundleLink}`)
+        .join(" | ");
+      if (bundleLines) msg += ` — Bundle page: ${bundleLines}`;
+      if (data.failures) {
+        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (link created, email not sent — see Resend in the table below)`;
+      }
+      setMessage(msg);
       setShareForVideo(null);
       setEmail("");
       loadAll();
@@ -80,8 +101,13 @@ export default function Admin() {
     if (data.ok) {
       const sentTo = data.recipients.map((r) => r.email).join(", ");
       let msg = `Created ${data.count} separate link${data.count !== 1 ? "s" : ""}; emailed ${sentTo}`;
+      const bundleLines = data.recipients
+        .filter((r) => r.bundleLink)
+        .map((r) => `${r.email}: ${r.bundleLink}`)
+        .join(" | ");
+      if (bundleLines) msg += ` — Bundle pages: ${bundleLines}`;
       if (data.failures) {
-        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (links created, email not sent)`;
+        msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (links created, email not sent — see Resend in the table below)`;
       }
       setMessage(msg);
       setSelected(new Set());
@@ -113,6 +139,84 @@ export default function Admin() {
       body: JSON.stringify({ token }),
     });
     loadAll();
+  }
+
+  async function resend(token) {
+    setMessage("Resending...");
+    const res = await fetch("/api/share/resend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? "Email sent" : `Error: ${data.error}`);
+    loadAll();
+  }
+
+  async function resendSelected() {
+    const tokens = [...selectedShares];
+    if (tokens.length === 0) return;
+    setResendingBulk(true);
+    setMessage(`Resending ${tokens.length} link${tokens.length !== 1 ? "s" : ""}...`);
+    const res = await fetch("/api/share/resend-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens }),
+    });
+    const data = await res.json();
+    setResendingBulk(false);
+    if (data.ok) {
+      let msg = `Resent ${data.succeeded.length} of ${tokens.length}`;
+      if (data.failures.length > 0) {
+        msg += ` — FAILED for ${data.failures.length}: ${data.failures.map((f) => f.error).join("; ")}`;
+      }
+      setMessage(msg);
+      setSelectedShares(new Set());
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
+  async function extend(token) {
+    const hoursInput = prompt("Extend by how many hours?", "24");
+    if (!hoursInput) return;
+    setMessage("Extending...");
+    const res = await fetch("/api/share/extend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, hours: Number(hoursInput) }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? `Extended to ${new Date(data.expiresAt).toLocaleString()}` : `Error: ${data.error}`);
+    loadAll();
+  }
+
+  async function extendSelected() {
+    const tokens = [...selectedShares];
+    if (tokens.length === 0) return;
+    const hoursInput = prompt(`Extend ${tokens.length} link${tokens.length !== 1 ? "s" : ""} by how many hours?`, "24");
+    if (!hoursInput) return;
+    setExtendingBulk(true);
+    setMessage(`Extending ${tokens.length} link${tokens.length !== 1 ? "s" : ""}...`);
+    const res = await fetch("/api/share/extend-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens, hours: Number(hoursInput) }),
+    });
+    const data = await res.json();
+    setExtendingBulk(false);
+    if (data.ok) {
+      let msg = `Extended ${data.succeeded.length} of ${tokens.length}`;
+      if (data.failures.length > 0) {
+        msg += ` — FAILED for ${data.failures.length}: ${data.failures.map((f) => f.error).join("; ")}`;
+      }
+      setMessage(msg);
+      setSelectedShares(new Set());
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
   }
 
   function statusOf(s) {
@@ -220,9 +324,26 @@ export default function Admin() {
           🗑 Clean up expired &amp; revoked
         </button>
       </div>
+
+      {selectedShares.size > 0 && (
+        <div style={styles.bulkBar}>
+          <strong>{selectedShares.size} link{selectedShares.size !== 1 ? "s" : ""} selected</strong>
+          <button onClick={resendSelected} disabled={resendingBulk} style={styles.btn}>
+            {resendingBulk ? "Resending..." : `Resend ${selectedShares.size}`}
+          </button>
+          <button onClick={extendSelected} disabled={extendingBulk} style={styles.btn}>
+            {extendingBulk ? "Extending..." : `Extend ${selectedShares.size}`}
+          </button>
+          <button onClick={() => setSelectedShares(new Set())} style={styles.btnSecondary}>
+            Clear
+          </button>
+        </div>
+      )}
+
       <table style={styles.table}>
         <thead>
           <tr>
+            <th></th>
             <th>Video</th>
             <th>Email</th>
             <th>Link</th>
@@ -234,32 +355,62 @@ export default function Admin() {
           </tr>
         </thead>
         <tbody>
-          {shares.map((s) => (
-            <tr key={s.token}>
-              <td>{s.videoTitle}</td>
-              <td>{s.email}</td>
-              <td>
-                <a href={`/watch/${s.token}`} target="_blank" rel="noreferrer" style={{ fontSize: 13, wordBreak: "break-all" }}>
-                  /watch/{s.token}
-                </a>
-              </td>
-              <td>{statusOf(s)}</td>
-              <td title={s.lastViewedAt ? `Last viewed ${new Date(s.lastViewedAt).toLocaleString()}` : "Never viewed"}>
-                {s.viewCount ? `${s.viewCount}×` : "—"}
-              </td>
-              <td title={s.lastPlayedAt ? `Last played ${new Date(s.lastPlayedAt).toLocaleString()}${s.playCount ? `, ${s.playCount} play${s.playCount !== 1 ? "s" : ""}` : ""}` : "Never played"}>
-                {s.completedAt ? "100% ✓" : s.maxProgressPct ? `${s.maxProgressPct}%` : s.playCount ? "started" : "—"}
-              </td>
-              <td>{new Date(s.expiresAt).toLocaleString()}</td>
-              <td>
-                {statusOf(s) === "Active" && (
-                  <button onClick={() => revoke(s.token)} style={styles.btnDanger}>
-                    Revoke
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
+          {shares.map((s) => {
+            const active = statusOf(s) === "Active";
+            const extendable = !s.revoked; // extend works on Active or Expired, just not Revoked
+            return (
+              <tr key={s.token}>
+                <td>
+                  {extendable && (
+                    <input
+                      type="checkbox"
+                      checked={selectedShares.has(s.token)}
+                      onChange={() => toggleShareSelected(s.token)}
+                    />
+                  )}
+                </td>
+                <td>{s.videoTitle}</td>
+                <td>{s.email}</td>
+                <td>
+                  <a href={`/watch/${s.token}`} target="_blank" rel="noreferrer" style={{ fontSize: 13, wordBreak: "break-all" }}>
+                    /watch/{s.token}
+                  </a>
+                </td>
+                <td>
+                  {statusOf(s)}
+                  {s.emailFailed && (
+                    <div style={styles.emailFailedBadge} title={s.emailError || "Email failed to send"}>
+                      ⚠ email failed
+                    </div>
+                  )}
+                </td>
+                <td title={s.lastViewedAt ? `Last viewed ${new Date(s.lastViewedAt).toLocaleString()}` : "Never viewed"}>
+                  {s.viewCount ? `${s.viewCount}×` : "—"}
+                </td>
+                <td title={s.lastPlayedAt ? `Last played ${new Date(s.lastPlayedAt).toLocaleString()}${s.playCount ? `, ${s.playCount} play${s.playCount !== 1 ? "s" : ""}` : ""}` : "Never played"}>
+                  {s.completedAt ? "100% ✓" : s.maxProgressPct ? `${s.maxProgressPct}%` : s.playCount ? "started" : "—"}
+                </td>
+                <td>{new Date(s.expiresAt).toLocaleString()}</td>
+                <td>
+                  {active && (
+                    <button onClick={() => resend(s.token)} style={styles.btn}>
+                      Resend
+                    </button>
+                  )}
+                  {extendable && (
+                    <button onClick={() => extend(s.token)} style={styles.btn}>
+                      Extend
+                    </button>
+                  )}
+                  {active && (
+                    <button onClick={() => revoke(s.token)} style={styles.btnDanger}>
+                      Revoke
+                    </button>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -281,4 +432,5 @@ const styles = {
   message: { color: "#1f6feb" },
   bulkBar: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, marginBottom: 16, border: "1px solid #1f6feb", background: "#eef4ff", borderRadius: 8 },
   selectLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4, cursor: "pointer" },
+  emailFailedBadge: { fontSize: 12, color: "#d1242f" },
 };

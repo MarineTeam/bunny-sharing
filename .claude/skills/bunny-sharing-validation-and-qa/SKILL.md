@@ -4,7 +4,8 @@ description: >
   Evidence standards for the bunny-sharing repo: the L0-L4 evidence ladder
   (build → gate self-test → live probes → manual E2E checklists → campaign
   certification), the checkbox E2E procedures for single share, bulk share,
-  expiry, anti-enumeration, and the middleware auth boundary, the
+  the bundle listing page, expiry, anti-enumeration, and the middleware auth
+  boundary, the
   golden/certified inventory, and the candidate plan for adding automated
   tests (none exist today). Load this when you need to know WHAT COUNTS AS
   PROOF that a change works, before claiming anything "works", or when adding
@@ -64,6 +65,35 @@ must be literally observed, not assumed.
 - [ ] Comma-string regression guard: POST `/api/share-bulk` with legacy shape `{"videos":[...],"email":"a@b.c, d@e.f"}` and `/api/share` with `{"videoId":"...","email":"a@b.c, d@e.f"}` → each stored record's `email` field holds exactly ONE address (verify via kv-inspect), never the combined string.
 - [ ] View tracking: watch one link → its shares-table row shows Views `1×` (hover shows last-viewed time); the unwatched rows show `—`. Reload the watch page → count increments.
 - [ ] Playback tracking (needs a real Bunny video): press play → row's Watched column shows `started`; scrub past 25/50/75% → shows the milestone %; play to the end → `100% ✓`. Opening the page WITHOUT pressing play must leave Watched at `—` while Views increments — that separation is the feature's point.
+- [ ] Email-failure handling (as of 2026-07-20): with SMTP/Resend deliberately broken, create a share → response is still 200 with a `failures` entry (single-recipient `/api/share` is the exception — one recipient, one failure, 500) and the record persists with `emailFailed: true`; the shares table shows "⚠ email failed"; click Resend after fixing creds → `emailFailed`/`emailError` disappear from the record (verify via kv-inspect, not just the UI).
+- [ ] General resend, not just failure-recovery (added 2026-07-20): Resend works on a share that never had `emailFailed` set (no error shown, just re-sends). Select 3+ active rows via the checkboxes → "Resend N" bulk bar → `/api/share/resend-bulk` → response reports `succeeded`/`failures` per token; include one nonexistent or revoked token in the selection → that one reports a failure (`"Share not found"` or `"Share is revoked or expired"`) while the others still succeed.
+
+### Bundle listing page (added 2026-07-20)
+- [ ] Bulk-share ≥2 videos to one recipient → the `/api/share-bulk` response includes a `bundleLink`, and the recipient's email now also contains "view them all in one place" alongside the per-video links (both present — additive, not a replacement).
+- [ ] Open the bundle link unauthenticated → the email form, NOT the list.
+- [ ] Submit the matching email → magic link arrives; clicking it exchanges for cookies. Inspect the response headers directly (`curl -i`, not a tool that only shows the last `Set-Cookie`): ONE `gate_bundle_<id>` cookie AND one `gate_<token>` cookie per member, all in the same response.
+- [ ] Reload the bundle page → lists all member videos as links, no re-verification needed (bundle cookie).
+- [ ] Open one member's `/watch/<token>` URL directly (not by clicking from the list, to rule out any client-side state) → plays immediately, no email form — proves the per-video cookies minted by the bundle exchange are real, standard gate cookies.
+- [ ] Revoke one member via `/api/revoke` → its `/watch/<token>` page shows "revoked" AND, on the SAME reload of the bundle page, that entry becomes non-clickable text `<title> — revoked` while other members stay live links. This is the no-second-source-of-truth check — the bundle record itself must NOT have been touched by the revoke, only the member's own `bunnyshare:` record.
+- [ ] Anti-enumeration on the bundle gate: diff `/api/bundle/request-link` responses for right/wrong email and a nonexistent bundle id — must be byte-identical, same as the per-video gate.
+- [ ] Tampered bundle grant (append a character) → falls back to the email form, not the list.
+- [ ] `/api/cleanup` deletes a `bunnybundle:*` record once `Date.now() > expiresAt` (kv-inspect before/after).
+
+### One bundle per email, not per call (added 2026-07-20)
+- [ ] Single-share a video to a fresh recipient via `/api/share` → response has a `bundleLink`, email is the plain single-video email (not consolidated — this recipient has only one active share).
+- [ ] Single-share a SECOND video to the SAME recipient via another `/api/share` call → response's `bundleLink` is IDENTICAL to the first call's; the email is now the consolidated multi-item email listing BOTH videos, not a second standalone email.
+- [ ] Cross-endpoint: bulk-share one video to a fresh recipient, then single-share another video to that same recipient → same `bundleLink` both times; the second email lists both videos.
+- [ ] Orphan sweep: manually write a `bunnyshare:<token>` record for an email with no bundle yet (kv-inspect / direct KV write), then share a new video to that email → the new bundle's `tokens` includes BOTH the pre-existing token and the new one, and the notification email lists both.
+- [ ] A REVOKED or expired pre-existing record for that email must NOT be swept in — verify by revoking one first, then checking the fresh bundle only contains the still-active token(s).
+- [ ] An unrelated third recipient sharing at any point in this sequence is unaffected: distinct bundle, plain single-video email (assuming it's their first).
+
+### Extend a share's expiry (added 2026-07-21)
+- [ ] Create a share with a short expiry, note `expiresAt` (kv-inspect). Extend it via the admin UI or `/api/share/extend` with `{token, hours}` while still Active → new `expiresAt` equals the OLD `expiresAt` plus `hours*3600*1000` exactly (not "plus hours from now").
+- [ ] Create a share with an extremely short expiry (e.g. `hours: 0.001`), wait for it to actually pass, THEN extend it → new `expiresAt` lands at `Date.now()`-at-extend-time plus `hours*3600*1000`, not the old stale expiry plus the delta (the two would diverge for anything but a trivial `hours` value — assert against a `date +%s%3N`-style timestamp taken right before the call).
+- [ ] Revoke a share, then try to extend it → `400 {"error":"Cannot extend a revoked share"}`, and `expiresAt` is unchanged (kv-inspect).
+- [ ] Bulk extend 3 tokens where one is nonexistent and one is revoked → the valid one(s) succeed, the bad two report per-token failures (`"Share not found"` / `"Cannot extend a revoked share"`), response is still 200 overall.
+- [ ] Extend a share that belongs to a bundle (bulk-share ≥2 videos first) → the bundle's own `expiresAt` (kv-inspect `bunnybundle:<id>`) is re-maxed to match, without touching the bundle's `tokens` list.
+- [ ] Middleware boundary: `/api/share/extend` and `/api/share/extend-bulk` both 401 without admin creds.
 
 ### Expiry
 - [ ] Create a share with hours = a small fraction (e.g. 0.02 ≈ 72 s — `hours` is multiplied by 3600·1000; verify the record's expiresAt via kv-inspect).
@@ -96,7 +126,11 @@ As of 2026-07-18:
 | --- | --- | --- |
 | Gate crypto (lib/gate.js) | CERTIFIED | gate-selftest 9/9, run 2026-07-18 |
 | Production build | CERTIFIED | `npm run build` clean (with expected middleware-deprecation warning) |
-| Everything live (email delivery, gate E2E, bulk E2E, Bunny playback) | UNCERTIFIED | Never exercised against real services — bunny-sharing-email-gate-campaign is the path to certification |
+| Email-failure flagging + resend, incl. bulk (setEmailFailed, /api/share/resend, /api/share/resend-bulk) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against a throwaway mock Upstash-REST KV + mock SMTP listener — flag set on failure, persists past reload, cleared on successful resend, bulk per-recipient isolation confirmed. Resend also verified as a general action (works with no prior failure) and bulk resend verified with a mixed valid/invalid/revoked token selection. NOT yet tried against real Resend failures specifically |
+| Bundle listing page (lib/bundles.js, /bundle/[bundleId], /api/bundle/request-link) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against the same mock KV + mock SMTP — bundle creation, email-gate exchange, multi-cookie minting, live status propagation on revoke (no second source of truth), anti-enumeration uniformity, tampered-grant rejection, and cleanup sweep all observed. NOT yet exercised in production (real https, Secure-cookie flag) |
+| One-bundle-per-email consolidation (findOrExtendBundle, getBundleItems — both share.js and share-bulk.js) | CERTIFIED against mocks (L2/L3) | 2026-07-20 (same day, follow-up): two separate single-share calls to the same address consolidated into one email with a stable bundle link; cross-endpoint (bulk then single) consolidation confirmed; orphan sweep folded in a manually-injected pre-existing record; a revoked orphan was correctly excluded; an unrelated recipient was unaffected. NOT yet tried at scale (many bundles/shares) or against real Resend |
+| Expiry extend, incl. bulk + bundle propagation (extendOne, extendBundleForToken — /api/share/extend, /api/share/extend-bulk) | CERTIFIED against mocks (L2/L3) | 2026-07-21: extending a not-yet-expired share added exactly the requested hours to its OLD expiry; extending an already-expired share correctly extended from now, not the stale expiry; a revoked share was correctly rejected with expiresAt unchanged; bulk extend with a mix of valid/nonexistent/revoked tokens reported per-token results without failing the batch; extending one bundle member correctly re-maxed the bundle's own expiresAt. Middleware boundary re-checked (both routes 401 without admin creds). NOT yet tried at scale or in production |
+| Everything else live (real email delivery, gate E2E, bulk E2E, Bunny playback) | UNCERTIFIED | Never exercised against real services — bunny-sharing-email-gate-campaign is the path to certification |
 
 Update this table (via change-control) whenever a campaign phase or E2E
 checklist upgrades a surface.
@@ -134,10 +168,15 @@ convention, not a stated rule): Node's built-in runner.
 
 ## Provenance and maintenance
 
-Verified 2026-07-18 on branch claude/bulk-share-separate-links-auth-cblrle.
+Verified 2026-07-18 on branch claude/bulk-share-separate-links-auth-cblrle;
+email-failure and bundle sections added 2026-07-20, expiry-extend section
+added 2026-07-21 — all verified live against a mock KV + mock SMTP (not real
+Resend/Upstash — see the golden inventory table's caveats for each).
 
 - Still no tests/CI: `cat package.json | grep -A4 scripts; ls .github 2>&1` (expect no test script; No such file).
 - Generic message string: `grep -n "sign-in link to it" pages/api/watch/request-link.js`.
-- 401 boundary: `grep -n "matcher" middleware.js` (expect `/api/((?!watch/).*)`).
+- 401 boundary: `grep -n "matcher" middleware.js` (expect `/api/((?!watch/|bundle/).*)`).
 - Hours→ms math: `grep -n "3600 \* 1000" lib/shares.js`.
+- Extend math: `grep -n "Math.max(Date.now()" pages/api/share/extend.js`.
+- Bundle record shape: `grep -n "createBundleRecord\|getBundleMembers" lib/bundles.js`.
 - Golden inventory freshness: re-run gate-selftest and `npm run build` before trusting the table.
