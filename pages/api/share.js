@@ -1,5 +1,6 @@
 import { createShareRecord, setEmailFailed, baseUrl, parseEmails } from "../../lib/shares";
-import { sendShareEmail } from "../../lib/mailer";
+import { findOrExtendBundle, getBundleItems } from "../../lib/bundles";
+import { sendShareEmail, sendBulkShareEmail } from "../../lib/mailer";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
@@ -25,20 +26,37 @@ export default async function handler(req, res) {
         siteUrl,
       });
 
+      // Every recipient gets (or extends) a bundle, so a later share to the
+      // same address always has something to fold into. Only the EMAIL
+      // content changes based on what's in it: a recipient with no other
+      // active shares still gets the plain single-video email; one with
+      // existing active shares gets ONE consolidated email listing
+      // everything current — instead of yet another standalone notification.
+      const { record: bundle, link: bundleLink } = await findOrExtendBundle({
+        email: to,
+        members: [{ token: record.token, expiresAt: record.expiresAt }],
+        siteUrl,
+      });
+
       try {
-        await sendShareEmail({
-          to,
-          videoTitle: record.videoTitle,
-          link,
-          expiresAt: record.expiresAt,
-        });
-        links.push({ email: to, link });
+        if (bundle.tokens.length > 1) {
+          const items = await getBundleItems(bundle.tokens, siteUrl);
+          await sendBulkShareEmail({ to, items, expiresAt: bundle.expiresAt, bundleLink });
+        } else {
+          await sendShareEmail({
+            to,
+            videoTitle: record.videoTitle,
+            link,
+            expiresAt: record.expiresAt,
+          });
+        }
+        links.push({ email: to, link, bundleLink });
       } catch (err) {
         // The record exists (link is live) even though the notification
         // failed — flag it so it isn't a silent ghost in the admin table,
         // and report the failure instead of 500ing the whole batch.
         await setEmailFailed(record.token, true, err.message);
-        failures.push({ email: to, link, error: err.message });
+        failures.push({ email: to, link, error: err.message, bundleLink });
       }
     }
 

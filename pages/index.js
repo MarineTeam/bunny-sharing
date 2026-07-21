@@ -63,6 +63,11 @@ export default function Admin() {
     const data = await res.json();
     if (data.ok) {
       let msg = `Sent to ${email}`;
+      const bundleLines = data.links
+        .filter((l) => l.bundleLink)
+        .map((l) => `${l.email}: ${l.bundleLink}`)
+        .join(" | ");
+      if (bundleLines) msg += ` — Bundle page: ${bundleLines}`;
       if (data.failures) {
         msg += ` — FAILED for ${data.failures.map((f) => f.email).join(", ")} (link created, email not sent — see Resend in the table below)`;
       }

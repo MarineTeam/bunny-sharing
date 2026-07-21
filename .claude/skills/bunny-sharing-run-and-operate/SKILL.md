@@ -109,8 +109,7 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    `{videoId, videoTitle, email, hours}`. Server side
    (`pages/api/share.js`): `createShareRecord` (lib/shares.js) mints
    `token = crypto.randomBytes(16).toString("hex")`, writes the record to
-   `bunnyshare:<token>`, then `sendShareEmail` emails the recipient
-   `<site>/watch/<token>`. The record is stored BEFORE the email is sent, so
+   `bunnyshare:<token>`. The record is stored BEFORE the email is sent, so
    a send failure still leaves a live share record — as of 2026-07-20 this
    is flagged (`emailFailed`/`emailError`, shown as "⚠ email failed" in the
    shares table) rather than being a silent ghost. The Resend button
@@ -119,7 +118,14 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    an email even if nothing failed — and clears the flag on success. Shares
    table rows also have select checkboxes and a "Resend N" bulk bar
    (`/api/share/resend-bulk`, `{tokens: [...]}` → `{succeeded, failures}`,
-   never fails the whole selection on one bad token).
+   never fails the whole selection on one bad token). Widened same day: the
+   recipient's bundle is looked up/extended (`findOrExtendBundle`,
+   lib/bundles.js) before sending — if this is their only active share, they
+   get the plain `sendShareEmail`; if they already have any other active
+   share (from a prior single OR bulk share, in either order), this one
+   folds into ONE consolidated email (`sendBulkShareEmail`) listing
+   everything currently active for them, with the bundle link, instead of
+   becoming yet another standalone email (see 2c).
 4. **Bulk share** — tick Select checkboxes on 2+ cards → a bulk bar appears
    with an emails field (comma/space/semicolon-separated, one or more) and
    ONE hours field → `POST /api/share-bulk` with
@@ -127,14 +133,17 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    `email` string still accepted). Server side (`pages/api/share-bulk.js`):
    loops recipients × videos, calls `createShareRecord` once per pair
    (skipping entries with falsy `id`; 400 if none valid) → **M×N distinct
-   tokens, each independently revocable** — then creates ONE `bunnybundle:<id>`
-   record per recipient grouping their tokens (`createBundleRecord`,
-   lib/bundles.js) and sends each recipient ONE consolidated email listing
-   their own links plus a link to `/bundle/<id>` — a gated page listing all
-   of them (see 2c below; added 2026-07-20). A failed send for one recipient
-   is reported in the response `failures` array without blocking the others
-   (their records exist — resend or revoke). Invariant: bulk never reuses a
-   token across pairs. Views are
+   tokens, each independently revocable** — then finds-or-extends that
+   recipient's `bunnybundle:<id>` record (`findOrExtendBundle`,
+   lib/bundles.js — same call site 3 above uses, so a recipient's shares
+   from either endpoint converge onto ONE bundle) and sends each recipient
+   ONE consolidated email listing ALL of their currently active links (not
+   just this call's — `getBundleItems` rebuilds the list from the bundle's
+   full membership) plus a link to `/bundle/<id>` (see 2c below; added
+   2026-07-20). A failed send for one recipient is reported in the response
+   `failures` array without blocking the others (their records exist —
+   resend or revoke). Invariant: bulk never reuses a token across pairs.
+   Views are
    tracked per record (`viewCount`/`lastViewedAt`, shown in the shares
    table's Views column), and real playback separately
    (`playCount`/`maxProgressPct`/`completedAt` via `/api/watch/track`,
@@ -192,11 +201,15 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    verifies 3 times (once per link) UNLESS they instead verify once through
    the bundle page (2c) — that mints all 3 cookies in one go.
 
-### 2c. BUNDLE journey (added 2026-07-20)
+### 2c. BUNDLE journey (added 2026-07-20; widened same day to one-per-email)
 
-A shortcut for the RECIPIENT journey when links came from a bulk share:
-instead of re-verifying per video, one verification on the bundle page
-unlocks all of them.
+A shortcut for the RECIPIENT journey once a recipient has more than one
+active share: instead of re-verifying per video, one verification on the
+bundle page unlocks all of them. Every recipient converges onto ONE bundle
+over time — it's created (or found and extended) on their first share from
+EITHER `/api/share` or `/api/share-bulk`, and every later share to that same
+address (from either endpoint, in either order) adds to the same bundle
+rather than spawning a new one.
 
 1. **Bundle link** — recipient clicks `<site>/bundle/<bundleId>` (from the
    bulk-share email, alongside the per-video links). Public, never matched
@@ -257,22 +270,28 @@ value `1`, Redis `EX=30`, so it auto-expires after 30 seconds. While present,
 repeat magic-link requests for that share silently skip the email send (the
 response is still the generic 200). These keys never need manual cleanup.
 
-### Key: `bunnybundle:<bundleId>` — bundle records (added 2026-07-20)
+### Key: `bunnybundle:<bundleId>` — bundle records (added 2026-07-20; one per email, not per call, as of same day)
 
-One JSON object per recipient per `/api/share-bulk` call, written by
-`createBundleRecord` (lib/bundles.js):
+One JSON object per recipient EMAIL (not per call) — written by
+`createBundleRecord` the first time, then extended in place by
+`findOrExtendBundle` (both in lib/bundles.js) on every later share to that
+same address from either `/api/share` or `/api/share-bulk`:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `id` | string | 32 hex chars, same as in the key and the `/bundle/` URL |
-| `email` | string | The one recipient this bundle was created for |
-| `tokens` | array of string | Member share tokens — the truth for each member's title/status is ALWAYS re-read from its own `bunnyshare:<token>` record, never cached here |
-| `createdAt` | number | ms epoch |
-| `expiresAt` | number | ms epoch = max of all members' `expiresAt` |
+| `email` | string | The one recipient this bundle was created for; matched case/whitespace-insensitively (`normalizeEmail`, lib/gate.js) when deciding whether to extend vs create |
+| `tokens` | array of string | Member share tokens, appended to over time — the truth for each member's title/status is ALWAYS re-read from its own `bunnyshare:<token>` record, never cached here |
+| `createdAt` | number | ms epoch, set once at first creation |
+| `expiresAt` | number | ms epoch = max of all members' `expiresAt`, re-maxed on every extend |
 
 No `revoked` field — a bundle isn't itself revocable, only its members are
 (via their own `bunnyshare:` records). Deleted by `/api/cleanup` once past
-`expiresAt`.
+`expiresAt`. When creating the FIRST bundle for an email, `findOrExtendBundle`
+also sweeps in other still-active `bunnyshare:*` records for that email not
+already claimed by another bundle, so the initial bundle reflects everything
+currently shared with that person, not only the share that triggered its
+creation.
 
 ### Key: `bundlethrottle:<bundleId>` — bundle magic-link throttle (self-expiring)
 
@@ -410,7 +429,10 @@ must update their exported `ADMIN_PASS`.
 Every fact above was read from the repo at branch
 `claude/bulk-share-separate-links-auth-cblrle` on 2026-07-18; the route
 manifest, cleanup, bulk-share, and bundle (2c) sections were updated
-2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`. Re-verify
+2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`, then
+updated again same day when bundles widened to one-per-email
+(`findOrExtendBundle`) and `/api/share.js` started participating too.
+Re-verify
 before trusting, in one line each:
 
 | Claim | Re-verify with |

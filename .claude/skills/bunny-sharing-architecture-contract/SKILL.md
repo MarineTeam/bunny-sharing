@@ -197,14 +197,39 @@ suggestions; they are the reasons the system is safe and simple.
   themselves. Revoking or letting one member expire never touches any other
   record.
 - **Bundle addition (2026-07-20 — see section 5.1a):** every `share-bulk`
-  call also creates one `bunnybundle:<id>` record per recipient (`lib/bundles.js`),
-  listing that recipient's member tokens, and a `/bundle/<id>` gated page
-  (`pages/bundle/[bundleId].js`) that lists them. The bundle record holds
-  ONLY the token list, email, and its own `createdAt`/`expiresAt` (max of
-  members) — it never stores a member's title, revoked flag, or status.
-  `getBundleMembers` (`lib/bundles.js`) always re-reads each `bunnyshare:<token>`
-  live, so the bundle page can never show stale status; there is exactly one
-  source of truth for a share's state (invariant 1 still holds).
+  call, and every `share.js` call too (widened same day — see below),
+  creates or extends one `bunnybundle:<id>` record per recipient
+  (`lib/bundles.js`), listing that recipient's member tokens, and a
+  `/bundle/<id>` gated page (`pages/bundle/[bundleId].js`) that lists them.
+  The bundle record holds ONLY the token list, email, and its own
+  `createdAt`/`expiresAt` (max of members) — it never stores a member's
+  title, revoked flag, or status. `getBundleMembers` (`lib/bundles.js`)
+  always re-reads each `bunnyshare:<token>` live, so the bundle page can
+  never show stale status; there is exactly one source of truth for a
+  share's state (invariant 1 still holds).
+- **One bundle per email, not per call (widened same day):**
+  `findOrExtendBundle` (`lib/bundles.js`) looks for an existing, still-active
+  bundle whose `email` matches (normalized) before creating a new one. If
+  found, it appends the new members' tokens and extends `expiresAt` to the
+  later of the two — so a recipient shared with across several separate
+  admin actions (single share today, bulk share next week) keeps exactly ONE
+  bundle page/link for their entire relationship with this deployment,
+  rather than accumulating a new bundle every time. If NOT found (first time
+  this email has ever been shared with, or their prior bundle expired), it
+  also sweeps in any other still-active `bunnyshare:*` records for that
+  email not already claimed by another bundle (e.g. single-video shares made
+  before this widening existed) — so the first bundle for someone reflects
+  everything currently shared with them, not just what's new. `/api/share.js`
+  now always calls this too: a recipient's first share still gets the plain
+  single-video email (`sendShareEmail`), but the moment they have more than
+  one active share (from ANY endpoint, in ANY order), every subsequent
+  notification uses `getBundleItems` to build ONE consolidated email
+  (`sendBulkShareEmail`) listing everything currently active for them,
+  instead of firing a new standalone email per share. This is a policy
+  choice, not a security property: the effect is "recipient's active shares
+  converge to one bundle and one running conversation," which is what was
+  asked for ("if they are the same email, they should be in the same
+  email").
 - **Bundle gate is a second application of the same mechanism, not a bypass**:
   the bundle page is gated by the identical stateless-HMAC magic-link
   mechanism (section 2.2), scoped to a `bundle:<id>` pseudo-token that can
@@ -222,7 +247,18 @@ suggestions; they are the reasons the system is safe and simple.
   member's status (instead of re-reading `bunnyshare:<token>`) reintroduces
   the second-source-of-truth risk this design deliberately avoids. Any code
   path that reads `bundle.tokens` and does NOT re-fetch each `bunnyshare:`
-  record before showing title/status is wrong.
+  record before showing title/status is wrong. `findOrExtendBundle` does a
+  full `KEYS bunnybundle:*` AND `KEYS bunnyshare:*` scan on every call where
+  no active bundle is found yet for that email (the orphan sweep) — extends
+  the KEYS-scan performance profile (roadmap item a) to `/api/share.js` too,
+  not just admin listing/cleanup; accepted at current scale, revisit
+  together. Also note: if a recipient already unlocked a bundle (has a valid
+  `gate_bundle_<id>` cookie) and a NEW share is later folded into that same
+  bundle, the new video appears in the listing immediately but has no
+  per-video `gate_<token>` cookie yet — no per-video cookies are minted
+  outside a fresh grant exchange (section 2.3/5.2), so clicking it correctly
+  falls back to that video's own email gate. Graceful degradation, not a
+  bug.
 
 ### 2.7 Middleware negative-lookahead matcher is the sole admin auth boundary
 
@@ -364,16 +400,19 @@ survive a deploy.
 
 ### 5.1a Bundle record — KV key `bunnybundle:<bundleId>`
 
-Created in `lib/bundles.js` (`createBundleRecord`) by `pages/api/share-bulk.js`,
-one per recipient per bulk-share call.
+Created in `lib/bundles.js` (`createBundleRecord`, or `findOrExtendBundle`
+which extends an existing one instead when found) by BOTH
+`pages/api/share-bulk.js` and `pages/api/share.js` (widened 2026-07-20) —
+one bundle per email that ever gets a share, kept alive and extended across
+however many separate calls touch that email, not one bundle per call.
 
 | Field | Type | Value / meaning |
 |-------|------|-----------------|
 | `id` | string | 32 lowercase hex chars — same generation as a share token, but a distinct KV namespace (`bunnybundle:`, never `bunnyshare:`) |
-| `email` | string | The one recipient this bundle was created for |
-| `tokens` | array of string | The member share tokens (`bunnyshare:<token>` keys), in creation order |
-| `createdAt` | number | Unix epoch milliseconds |
-| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` — the bundle listing itself is considered expired once every member would be, individually |
+| `email` | string | The one recipient this bundle belongs to, as first typed (not normalized) — `findOrExtendBundle` matches with `normalizeEmail` for lookup, but never rewrites this field on an existing bundle |
+| `tokens` | array of string | The member share tokens (`bunnyshare:<token>` keys); grows via `findOrExtendBundle` as more shares are created for this email; never shrinks (a revoked/expired member stays listed, just filtered out live by `getBundleMembers`/`getBundleItems`) |
+| `createdAt` | number | Unix epoch milliseconds — set once, at first creation, never updated on extend |
+| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` at creation, re-maxed against new members on every extend — the bundle listing itself is considered expired once every member would be, individually |
 
 Deliberately absent: `videoTitle`, `revoked`, any per-member status. A
 bundle is a grouping list, not a share — `getBundleMembers` (`lib/bundles.js`)
@@ -482,7 +521,12 @@ at commit `5905bba`, by direct reading of: `middleware.js`, `lib/gate.js`,
 Sections 2.6, 2.7, 5.1a, 5.2-5.4 updated 2026-07-20 for the bundle feature
 (`lib/bundles.js`, `pages/bundle/[bundleId].js`,
 `pages/api/bundle/request-link.js`), verified live against a mock KV + mock
-SMTP (see bunny-sharing-roadmap item h for the observation log).
+SMTP (see bunny-sharing-roadmap item h for the observation log). Section 2.6
+and 5.1a updated again same day when bundles were widened from "one per
+bulk-share call" to "one per email, extended across calls, including
+single-share" (`findOrExtendBundle`, `getBundleItems` in `lib/bundles.js`;
+`pages/api/share.js` now participates) — see bunny-sharing-roadmap item h's
+follow-up entry for the observation log.
 
 Re-verify volatile facts before trusting them:
 
@@ -497,6 +541,7 @@ grep -n "generateEmbedUrl(record.videoId" "pages/watch/[token].js"              
 grep -n "RESEND_API_KEY" lib/mailer.js                                          # section 2.9
 grep -n "bunnybundle:\|getBundleMembers" lib/bundles.js                         # section 2.6 / 5.1a
 grep -n "gate_bundle_\|Path=/bundle" "pages/bundle/[bundleId].js"               # section 5.3 bundle cookie
+grep -n "findOrExtendBundle" lib/bundles.js pages/api/share.js pages/api/share-bulk.js  # one-bundle-per-email widening
 ```
 
 If any grep comes back changed or empty, the contract has drifted: read the

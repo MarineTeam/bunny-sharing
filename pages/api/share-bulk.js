@@ -1,5 +1,5 @@
 import { createShareRecord, setEmailFailed, baseUrl, parseEmails } from "../../lib/shares";
-import { createBundleRecord } from "../../lib/bundles";
+import { findOrExtendBundle, getBundleItems } from "../../lib/bundles";
 import { sendBulkShareEmail } from "../../lib/mailer";
 
 // Creates a separate share (distinct token + link) for every recipient x video
@@ -44,16 +44,24 @@ export default async function handler(req, res) {
         return res.status(400).json({ error: "No valid videos to share" });
       }
 
-      // Group this recipient's tokens under one gated listing page. The
-      // bundle record exists independent of the notification email below —
-      // it's just as valid to hand out even if the email send fails.
-      const { link: bundleLink } = await createBundleRecord({ email: to, members: created, siteUrl });
+      // Group this recipient's tokens under one gated listing page — reusing
+      // their existing bundle if they already have one (so a recipient
+      // shared with across several separate calls keeps ONE page/link, and
+      // this call's notification folds into it instead of standing alone).
+      // The bundle record exists independent of the notification email
+      // below — it's just as valid to hand out even if the email send fails.
+      const { record: bundle, link: bundleLink } = await findOrExtendBundle({ email: to, members: created, siteUrl });
 
       try {
+        // Built from the bundle's full current membership, not just this
+        // call's `created` — a recipient with prior active shares gets ONE
+        // email listing everything currently active, not a new standalone
+        // notification for just what's new.
+        const items = await getBundleItems(bundle.tokens, siteUrl);
         await sendBulkShareEmail({
           to,
-          items: created.map((c) => ({ videoTitle: c.videoTitle, link: c.link })),
-          expiresAt: Math.max(...created.map((c) => c.expiresAt)),
+          items,
+          expiresAt: bundle.expiresAt,
           bundleLink,
         });
         results.push({ email: to, links: created.map((c) => ({ videoId: c.videoId, link: c.link })), bundleLink });

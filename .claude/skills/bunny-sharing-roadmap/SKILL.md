@@ -212,6 +212,40 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   bulk-share success toast — there's no persistent "view bundle link" button
   in the shares table the way Revoke/Resend have one. Low priority; the link
   is already in the recipient's email and in the API response.
+- **Follow-up 2026-07-20 (same day) — one bundle per email, not per call:**
+  requirement: "if they are the same email, they should be in the same
+  email" — repeat shares to a recipient (from any endpoint, in any order)
+  should land in one running notification, not pile up separate emails.
+  `findOrExtendBundle` (`lib/bundles.js`) replaces the plain
+  `createBundleRecord` call in both `share-bulk.js` and (newly) `share.js`:
+  it looks for an existing active bundle for the email first and extends it
+  (union tokens, re-max expiresAt) instead of creating a second one; if none
+  exists yet, it also sweeps in any other still-active, not-yet-bundled
+  `bunnyshare:*` records for that email (covers shares made before this
+  widening, or via the single-share endpoint before it participated in
+  bundles at all) so the FIRST bundle for someone already reflects
+  everything currently shared with them. `getBundleItems` (`lib/bundles.js`)
+  builds `{videoTitle, link}` for a bundle's currently-active members, reused
+  by both endpoints' emails so the content sent is always "everything active
+  right now," not just "what this call created." `/api/share.js` sends the
+  plain original single-video email only when the bundle it just
+  created/extended has exactly one member (a genuine first-and-only share);
+  the moment a second one exists (this call or a prior one, either
+  endpoint), it sends the same consolidated multi-item email
+  `share-bulk.js` uses. Verified live against the mock KV/SMTP harness:
+  two separate `/api/share` calls to the same address → first sends the
+  plain email, second sends ONE email listing BOTH videos with the SAME
+  bundle link as the first response; a bulk share followed by a single
+  share to the same recipient consolidated the same way across endpoints; a
+  manually-injected pre-existing un-bundled `bunnyshare` record was folded
+  into a brand-new bundle by the orphan sweep; a REVOKED orphan record was
+  correctly excluded from the sweep (bundle stayed single-member, plain
+  email sent); an unrelated third recipient's share was unaffected (still
+  gets the plain email, distinct bundle). Not yet exercised: behavior at
+  meaningfully large numbers of bundles/shares (the orphan sweep is two full
+  `KEYS` scans on a cold bundle — same accepted-for-now performance class as
+  roadmap item a, now also reachable from `/api/share.js`, not just admin
+  listing/cleanup/bulk).
 
 ## 3. Positioning: standard vs actually nice
 

@@ -356,6 +356,22 @@ to unlock the videos" when it didn't — real browsers apply every
 `Set-Cookie` header in a response. Verify with a tool that shows all headers
 (e.g. `curl -i` prints each one on its own line) before suspecting the code.
 
+**"Why does this recipient's notification email include a video I didn't
+just share?"** — not a bug (widened 2026-07-20). `findOrExtendBundle`
+(lib/bundles.js) reuses a recipient's existing active bundle across BOTH
+`/api/share` and `/api/share-bulk` calls instead of making a new one every
+time, and the email content is always rebuilt from the bundle's FULL current
+membership (`getBundleItems`), not just what this particular call created.
+So sharing a second video to an address that already has one active share —
+from either endpoint, in either order, any time before the first one
+expires — produces ONE email listing both, with the same bundle link as
+before, not a second standalone email. To confirm this is what happened
+(not a mixed-up recipient): `curl` `bunnybundle:*` for that email
+(`kv-inspect`, or `$KV_REST_API_URL/keys/bunnybundle:*` then `/get/` each)
+and check `.tokens` — it should list every token that appeared in the email.
+If the email content and the bundle's `tokens` don't match, THAT is a real
+bug; if they match, this is the intended consolidation.
+
 ## Traps that cost real time
 
 **The two Bunny keys.** Bunny has two unrelated token-auth schemes and this app uses both: `BUNNY_TOKEN_KEY` (the Stream library's Embed View Token) signs iframe embed URLs as sha256 hex, while `BUNNY_CDN_TOKEN_KEY` (the pull zone's Token Authentication key, buried under Library > API > "CDN zone management" > Manage > Security) signs direct CDN URLs like thumbnails as base64url with `+/=` rewritten (lib/bunny.js:40-65). Before commit 65dc992 (2026-07-14) the app only knew the first key, so enabling pull-zone Token Authentication made every thumbnail 403 while embeds kept working — a baffling half-broken state. If exactly one of {thumbnails, embeds} is 403ing, suspect the corresponding key before anything else, and never assume one key serves both.
@@ -376,7 +392,7 @@ to unlock the videos" when it didn't — real browsers apply every
 
 ## Provenance and maintenance
 
-Written 2026-07-18 against branch `claude/bulk-share-separate-links-auth-cblrle` @ 5905bba; every cited line was read in that tree and the build warning + no-env build were reproduced the same day. S7 and the bundle-related table rows added 2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`/`pages/api/bundle/request-link.js`, verified live against a mock KV + mock SMTP. Re-verify before trusting drifted facts:
+Written 2026-07-18 against branch `claude/bulk-share-separate-links-auth-cblrle` @ 5905bba; every cited line was read in that tree and the build warning + no-env build were reproduced the same day. S7 and the bundle-related table rows added 2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`/`pages/api/bundle/request-link.js`, verified live against a mock KV + mock SMTP. The consolidation callout ("why does this email include a video I didn't just share") added same day when `findOrExtendBundle` widened bundles to one-per-email. Re-verify before trusting drifted facts:
 
 ```bash
 git log --oneline -1                                          # still near 5905bba (plus later commits)?
