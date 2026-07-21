@@ -2,14 +2,16 @@
 
 Notable changes to this project, newest first. Grouped by date, since most
 days below were their own batch of work rather than a discrete release.
-Two version tags mark points release notes were cut from this history:
+Three version tags mark points release notes were cut from this history:
 
+- **v1.2.0** — the email watermark (layered global / per-share / per-video /
+  exemption control), per-video analytics, and resume playback.
 - **v1.1.0** — everything from 2026-07-18 through 2026-07-21 (bulk sharing,
   the email gate, bundle pages and consolidation, resend/extend/revoke and
   their bulk forms).
 - **v1.0.0** — everything at and before 2026-07-06.
 
-## Unreleased
+## v1.2.0 — 2026-07-21
 
 ### Added
 - **Email watermark on the player.** The verified recipient's email can be
