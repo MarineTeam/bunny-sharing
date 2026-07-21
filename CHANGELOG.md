@@ -9,6 +9,32 @@ Two version tags mark points release notes were cut from this history:
   their bulk forms).
 - **v1.0.0** — everything at and before 2026-07-06.
 
+## Unreleased
+
+### Added
+- **Email watermark on the player.** The verified recipient's email can be
+  overlaid across the video (tiled, plus one drifting copy so a fixed crop
+  can't remove every instance) to deter casual re-sharing and attribute a
+  leaked screen-recording to one person. Layered control: a global default
+  (admin Settings panel), a per-share Always/Never override (Share form), and
+  an exemption list of emails/domains that are never watermarked (e.g. internal
+  admins/reviewers). Resolution order is exemption → per-share → global
+  default. Honest limit: it's a client-side overlay over the cross-origin
+  player, not burned into the video pixels — it raises effort and attributes
+  leaks, it is not DRM.
+- **Per-video analytics.** A collapsible admin panel rolls the existing
+  per-share tracking (views, plays, completion, furthest progress) up per
+  video — shares, unique recipients, total views, started, completed +
+  completion rate, and average progress. Reads only fields already stored; no
+  new tracking was added for it.
+- **Resume playback.** A returning viewer who left a video partway is offered
+  "Resume from m:ss" (or Start over). The player reports a throttled playback
+  position while watching; the watch page seeks to it on request. Skipped when
+  the saved point is basically the end.
+- **Global settings store.** First app-level settings, in a new
+  `bunnysettings:global` KV namespace, edited from a Settings panel on the
+  admin page and read/written via the admin-only `/api/settings` route.
+
 ## 2026-07-21
 
 ### Added

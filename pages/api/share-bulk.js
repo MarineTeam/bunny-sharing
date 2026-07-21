@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const { videos, emails, email, hours } = req.body;
+    const { videos, emails, email, hours, watermark } = req.body;
     // parseEmails splits comma/semicolon/whitespace-joined strings in BOTH
     // shapes — a legacy client sending email:"a@b.c, d@e.f" must fan out to
     // two recipients, never become one record with a combined email string.
@@ -37,6 +37,7 @@ export default async function handler(req, res) {
           email: to,
           hours,
           siteUrl,
+          watermark: typeof watermark === "boolean" ? watermark : undefined,
         });
         created.push({ token: record.token, videoId, videoTitle: record.videoTitle, link, expiresAt: record.expiresAt });
       }
