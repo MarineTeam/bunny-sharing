@@ -14,6 +14,7 @@ export default function Admin() {
   const [bulkSending, setBulkSending] = useState(false);
   const [selectedShares, setSelectedShares] = useState(() => new Set());
   const [resendingBulk, setResendingBulk] = useState(false);
+  const [extendingBulk, setExtendingBulk] = useState(false);
 
   function toggleSelected(id) {
     setSelected((prev) => {
@@ -177,6 +178,47 @@ export default function Admin() {
     }
   }
 
+  async function extend(token) {
+    const hoursInput = prompt("Extend by how many hours?", "24");
+    if (!hoursInput) return;
+    setMessage("Extending...");
+    const res = await fetch("/api/share/extend", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, hours: Number(hoursInput) }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? `Extended to ${new Date(data.expiresAt).toLocaleString()}` : `Error: ${data.error}`);
+    loadAll();
+  }
+
+  async function extendSelected() {
+    const tokens = [...selectedShares];
+    if (tokens.length === 0) return;
+    const hoursInput = prompt(`Extend ${tokens.length} link${tokens.length !== 1 ? "s" : ""} by how many hours?`, "24");
+    if (!hoursInput) return;
+    setExtendingBulk(true);
+    setMessage(`Extending ${tokens.length} link${tokens.length !== 1 ? "s" : ""}...`);
+    const res = await fetch("/api/share/extend-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tokens, hours: Number(hoursInput) }),
+    });
+    const data = await res.json();
+    setExtendingBulk(false);
+    if (data.ok) {
+      let msg = `Extended ${data.succeeded.length} of ${tokens.length}`;
+      if (data.failures.length > 0) {
+        msg += ` — FAILED for ${data.failures.length}: ${data.failures.map((f) => f.error).join("; ")}`;
+      }
+      setMessage(msg);
+      setSelectedShares(new Set());
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
   function statusOf(s) {
     if (s.revoked) return "Revoked";
     if (Date.now() > s.expiresAt) return "Expired";
@@ -289,6 +331,9 @@ export default function Admin() {
           <button onClick={resendSelected} disabled={resendingBulk} style={styles.btn}>
             {resendingBulk ? "Resending..." : `Resend ${selectedShares.size}`}
           </button>
+          <button onClick={extendSelected} disabled={extendingBulk} style={styles.btn}>
+            {extendingBulk ? "Extending..." : `Extend ${selectedShares.size}`}
+          </button>
           <button onClick={() => setSelectedShares(new Set())} style={styles.btnSecondary}>
             Clear
           </button>
@@ -312,10 +357,11 @@ export default function Admin() {
         <tbody>
           {shares.map((s) => {
             const active = statusOf(s) === "Active";
+            const extendable = !s.revoked; // extend works on Active or Expired, just not Revoked
             return (
               <tr key={s.token}>
                 <td>
-                  {active && (
+                  {extendable && (
                     <input
                       type="checkbox"
                       checked={selectedShares.has(s.token)}
@@ -349,6 +395,11 @@ export default function Admin() {
                   {active && (
                     <button onClick={() => resend(s.token)} style={styles.btn}>
                       Resend
+                    </button>
+                  )}
+                  {extendable && (
+                    <button onClick={() => extend(s.token)} style={styles.btn}>
+                      Extend
                     </button>
                   )}
                   {active && (

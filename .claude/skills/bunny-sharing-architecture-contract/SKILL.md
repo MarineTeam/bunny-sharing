@@ -295,6 +295,40 @@ suggestions; they are the reasons the system is safe and simple.
   reversibility. Making cleanup delete non-expired, non-revoked records
   breaks live links (invariant 1).
 
+### 2.8a Extend = mutate `expiresAt` in place; revoked blocks it (added 2026-07-21)
+
+- **Decision**: `/api/share/extend` (`extendOne`, exported from
+  `pages/api/share/extend.js`) takes `{token, hours}`, computes
+  `Math.max(Date.now(), record.expiresAt) + hours*3600*1000`, and writes
+  that back as the SAME record's `expiresAt` — same token, same `/watch/`
+  URL, same `gate_<token>` cookie name/scope, nothing else changes. Rejects
+  outright if `record.revoked` is true (`{error: "Cannot extend a revoked
+  share"}`); does NOT reject an already-expired-but-not-revoked share — that
+  is the primary use case ("this link died, give me a bit more time"), and
+  the `Math.max(Date.now(), ...)` base means extending a long-dead share
+  computes from now, not from a stale past timestamp that a small `hours`
+  value could leave still in the past. `/api/share/extend-bulk` applies the
+  same logic to a list of tokens independently
+  (`{succeeded: [...], failures: [...]}`, same never-fail-the-whole-batch
+  pattern as `/api/share/resend-bulk`). If the token belongs to a bundle,
+  `extendBundleForToken` (`lib/bundles.js`) re-maxes that bundle's own
+  `expiresAt` too, so the bundle listing doesn't expire before a member that
+  now legitimately outlives it (one-way: it only ever grows the bundle's
+  expiry, never shrinks it).
+- **Why**: The only prior way to give a recipient more time was revoke +
+  re-share, which mints a NEW token and breaks the existing link/bookmark —
+  directly against the never-break-live-links rule. Extending in place is
+  the compatible alternative: zero new fields, zero new KV entities, the
+  token a recipient already has keeps working, just for longer.
+- **What breaks**: Allowing extend on a REVOKED record would let this
+  endpoint silently double as an "un-revoke," undermining the admin's
+  deliberate access-denial decision (section 2.8) — that must stay a
+  separate, explicit action if it's ever added, not a side effect of
+  extending. Extend must never accept a negative or non-numeric `hours`
+  (checked: `Number.isFinite(addMs) && addMs > 0`) — a negative value would
+  let this endpoint be repurposed as a stealth-shorten, which is Revoke's
+  job and should stay visible as such.
+
 ### 2.9 `deliver()` is the single email chokepoint; provider is config, not code
 
 - **Decision**: All three senders (`sendShareEmail`, `sendBulkShareEmail`,
@@ -364,7 +398,7 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `videoTitle` | string | Display title; falls back to `videoId` if absent |
 | `email` | string | Exactly ONE recipient address per record — `parseEmails` (lib/shares.js) splits comma/semicolon/whitespace-joined input at the API boundary and both share endpoints fan out one record per address. NOT normalized at write time; the gate normalizes at compare time and (for legacy records that stored a combined string — see failure-archaeology Episode 9) matches the typed address against any address found in the stored string |
 | `createdAt` | number | Unix epoch **milliseconds** |
-| `expiresAt` | number | Unix epoch **milliseconds**: `Date.now() + (Number(hours) || 72) * 3600 * 1000` — default 72 h |
+| `expiresAt` | number | Unix epoch **milliseconds**, set at creation to `Date.now() + (Number(hours) || 72) * 3600 * 1000` (default 72 h); mutable in place by `/api/share/extend` (section 2.8a, added 2026-07-21) — `Math.max(Date.now(), current) + hours*3600*1000` — never on a revoked record |
 | `revoked` | boolean | `false` at creation; flipped to `true` by `/api/revoke`; never deleted except by `/api/cleanup` |
 | `viewCount` | number (optional) | Authorized page renders. ADDITIVE (added after 5905bba): absent on older records — read as `record.viewCount \|\| 0`, never assume present |
 | `firstViewedAt` | number (optional) | Unix ms of first authorized render; additive, may be absent |
@@ -412,7 +446,7 @@ however many separate calls touch that email, not one bundle per call.
 | `email` | string | The one recipient this bundle belongs to, as first typed (not normalized) — `findOrExtendBundle` matches with `normalizeEmail` for lookup, but never rewrites this field on an existing bundle |
 | `tokens` | array of string | The member share tokens (`bunnyshare:<token>` keys); grows via `findOrExtendBundle` as more shares are created for this email; never shrinks (a revoked/expired member stays listed, just filtered out live by `getBundleMembers`/`getBundleItems`) |
 | `createdAt` | number | Unix epoch milliseconds — set once, at first creation, never updated on extend |
-| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` at creation, re-maxed against new members on every extend — the bundle listing itself is considered expired once every member would be, individually |
+| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` at creation; re-maxed whenever `findOrExtendBundle` adds new members (section 2.6), AND whenever `extendBundleForToken` (section 2.8a) is called after a single member's own `expiresAt` grows via `/api/share/extend` — two different call sites, same one-way-grows-only rule — the bundle listing itself is considered expired once every member would be, individually |
 
 Deliberately absent: `videoTitle`, `revoked`, any per-member status. A
 bundle is a grouping list, not a share — `getBundleMembers` (`lib/bundles.js`)
@@ -526,7 +560,11 @@ and 5.1a updated again same day when bundles were widened from "one per
 bulk-share call" to "one per email, extended across calls, including
 single-share" (`findOrExtendBundle`, `getBundleItems` in `lib/bundles.js`;
 `pages/api/share.js` now participates) — see bunny-sharing-roadmap item h's
-follow-up entry for the observation log.
+follow-up entry for the observation log. Section 2.8a added 2026-07-21 for
+the expiry-extend feature (`pages/api/share/extend.js`,
+`pages/api/share/extend-bulk.js`, `extendBundleForToken` in
+`lib/bundles.js`), verified live against the same mock KV/SMTP harness — see
+bunny-sharing-roadmap item i.
 
 Re-verify volatile facts before trusting them:
 
@@ -542,6 +580,8 @@ grep -n "RESEND_API_KEY" lib/mailer.js                                          
 grep -n "bunnybundle:\|getBundleMembers" lib/bundles.js                         # section 2.6 / 5.1a
 grep -n "gate_bundle_\|Path=/bundle" "pages/bundle/[bundleId].js"               # section 5.3 bundle cookie
 grep -n "findOrExtendBundle" lib/bundles.js pages/api/share.js pages/api/share-bulk.js  # one-bundle-per-email widening
+grep -n "extendOne\|Cannot extend a revoked" pages/api/share/extend.js         # section 2.8a
+grep -n "extendBundleForToken" lib/bundles.js pages/api/share/extend.js        # bundle expiry propagation
 ```
 
 If any grep comes back changed or empty, the contract has drifted: read the

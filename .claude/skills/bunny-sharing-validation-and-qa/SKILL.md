@@ -87,6 +87,14 @@ must be literally observed, not assumed.
 - [ ] A REVOKED or expired pre-existing record for that email must NOT be swept in — verify by revoking one first, then checking the fresh bundle only contains the still-active token(s).
 - [ ] An unrelated third recipient sharing at any point in this sequence is unaffected: distinct bundle, plain single-video email (assuming it's their first).
 
+### Extend a share's expiry (added 2026-07-21)
+- [ ] Create a share with a short expiry, note `expiresAt` (kv-inspect). Extend it via the admin UI or `/api/share/extend` with `{token, hours}` while still Active → new `expiresAt` equals the OLD `expiresAt` plus `hours*3600*1000` exactly (not "plus hours from now").
+- [ ] Create a share with an extremely short expiry (e.g. `hours: 0.001`), wait for it to actually pass, THEN extend it → new `expiresAt` lands at `Date.now()`-at-extend-time plus `hours*3600*1000`, not the old stale expiry plus the delta (the two would diverge for anything but a trivial `hours` value — assert against a `date +%s%3N`-style timestamp taken right before the call).
+- [ ] Revoke a share, then try to extend it → `400 {"error":"Cannot extend a revoked share"}`, and `expiresAt` is unchanged (kv-inspect).
+- [ ] Bulk extend 3 tokens where one is nonexistent and one is revoked → the valid one(s) succeed, the bad two report per-token failures (`"Share not found"` / `"Cannot extend a revoked share"`), response is still 200 overall.
+- [ ] Extend a share that belongs to a bundle (bulk-share ≥2 videos first) → the bundle's own `expiresAt` (kv-inspect `bunnybundle:<id>`) is re-maxed to match, without touching the bundle's `tokens` list.
+- [ ] Middleware boundary: `/api/share/extend` and `/api/share/extend-bulk` both 401 without admin creds.
+
 ### Expiry
 - [ ] Create a share with hours = a small fraction (e.g. 0.02 ≈ 72 s — `hours` is multiplied by 3600·1000; verify the record's expiresAt via kv-inspect).
 - [ ] After expiry: `/watch/<token>` shows "This link has expired."; request-link on it returns the generic 200 but sends nothing.
@@ -121,6 +129,7 @@ As of 2026-07-18:
 | Email-failure flagging + resend, incl. bulk (setEmailFailed, /api/share/resend, /api/share/resend-bulk) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against a throwaway mock Upstash-REST KV + mock SMTP listener — flag set on failure, persists past reload, cleared on successful resend, bulk per-recipient isolation confirmed. Resend also verified as a general action (works with no prior failure) and bulk resend verified with a mixed valid/invalid/revoked token selection. NOT yet tried against real Resend failures specifically |
 | Bundle listing page (lib/bundles.js, /bundle/[bundleId], /api/bundle/request-link) | CERTIFIED against mocks (L2/L3) | 2026-07-20: verified against the same mock KV + mock SMTP — bundle creation, email-gate exchange, multi-cookie minting, live status propagation on revoke (no second source of truth), anti-enumeration uniformity, tampered-grant rejection, and cleanup sweep all observed. NOT yet exercised in production (real https, Secure-cookie flag) |
 | One-bundle-per-email consolidation (findOrExtendBundle, getBundleItems — both share.js and share-bulk.js) | CERTIFIED against mocks (L2/L3) | 2026-07-20 (same day, follow-up): two separate single-share calls to the same address consolidated into one email with a stable bundle link; cross-endpoint (bulk then single) consolidation confirmed; orphan sweep folded in a manually-injected pre-existing record; a revoked orphan was correctly excluded; an unrelated recipient was unaffected. NOT yet tried at scale (many bundles/shares) or against real Resend |
+| Expiry extend, incl. bulk + bundle propagation (extendOne, extendBundleForToken — /api/share/extend, /api/share/extend-bulk) | CERTIFIED against mocks (L2/L3) | 2026-07-21: extending a not-yet-expired share added exactly the requested hours to its OLD expiry; extending an already-expired share correctly extended from now, not the stale expiry; a revoked share was correctly rejected with expiresAt unchanged; bulk extend with a mix of valid/nonexistent/revoked tokens reported per-token results without failing the batch; extending one bundle member correctly re-maxed the bundle's own expiresAt. Middleware boundary re-checked (both routes 401 without admin creds). NOT yet tried at scale or in production |
 | Everything else live (real email delivery, gate E2E, bulk E2E, Bunny playback) | UNCERTIFIED | Never exercised against real services — bunny-sharing-email-gate-campaign is the path to certification |
 
 Update this table (via change-control) whenever a campaign phase or E2E
@@ -160,13 +169,14 @@ convention, not a stated rule): Node's built-in runner.
 ## Provenance and maintenance
 
 Verified 2026-07-18 on branch claude/bulk-share-separate-links-auth-cblrle;
-email-failure and bundle sections added 2026-07-20 and verified live against
-a mock KV + mock SMTP (not real Resend/Upstash — see the golden inventory
-table's caveats for each).
+email-failure and bundle sections added 2026-07-20, expiry-extend section
+added 2026-07-21 — all verified live against a mock KV + mock SMTP (not real
+Resend/Upstash — see the golden inventory table's caveats for each).
 
 - Still no tests/CI: `cat package.json | grep -A4 scripts; ls .github 2>&1` (expect no test script; No such file).
 - Generic message string: `grep -n "sign-in link to it" pages/api/watch/request-link.js`.
 - 401 boundary: `grep -n "matcher" middleware.js` (expect `/api/((?!watch/|bundle/).*)`).
 - Hours→ms math: `grep -n "3600 \* 1000" lib/shares.js`.
+- Extend math: `grep -n "Math.max(Date.now()" pages/api/share/extend.js`.
 - Bundle record shape: `grep -n "createBundleRecord\|getBundleMembers" lib/bundles.js`.
 - Golden inventory freshness: re-run gate-selftest and `npm run build` before trusting the table.

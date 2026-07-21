@@ -247,6 +247,52 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   roadmap item a, now also reachable from `/api/share.js`, not just admin
   listing/cleanup/bulk).
 
+### (i) Extend a share's expiry — ADOPTED 2026-07-21
+- **Was:** the only way to give a recipient more time was revoke + re-share,
+  which mints a brand-new token and breaks the existing link/bookmark — the
+  one workflow that actively violated the never-break-live-links rule.
+- **What shipped:** `extendOne` (exported from `pages/api/share/extend.js`)
+  takes `{token, hours}`, rejects revoked records
+  (`"Cannot extend a revoked share"`) and non-positive/non-numeric `hours`,
+  and otherwise sets `expiresAt = Math.max(Date.now(), record.expiresAt) +
+  hours*3600*1000` in place — same token, same URL, same cookie, nothing
+  else changes. Deliberately allowed on an ALREADY-EXPIRED (not revoked)
+  share — extending from `Date.now()` rather than the stale past expiry, so
+  "it died, give me a bit more time" (the common real case) works correctly
+  instead of silently landing back in the past for a small `hours` value.
+  `pages/api/share/extend-bulk.js` applies the same logic to
+  `{tokens: [...], hours}`, reporting `{succeeded, failures}` per token —
+  never fails the whole selection on one bad/revoked/missing token, same
+  pattern as `resend-bulk`. `extendBundleForToken` (`lib/bundles.js`)
+  re-maxes a member's bundle's `expiresAt` too, so the bundle listing
+  doesn't lapse before a member that now legitimately outlives it (one-way:
+  only ever grows). Admin UI: an "Extend" button appears on every
+  non-revoked row (Active OR Expired — unlike Resend/Revoke, which stay
+  Active-only) using a plain `prompt()` for the hours value (no new modal —
+  matches the codebase's existing use of `confirm()` for lightweight admin
+  actions); the existing bulk-select checkboxes (shared with bulk Resend)
+  were widened from Active-only to non-revoked, and an "Extend N" button
+  sits next to "Resend N" in the bulk bar.
+- **Verified:** L0 (`npm run build` clean, both routes registered) + a live
+  L2/L3 pass against the mock KV/SMTP harness: created a 1-hour share,
+  extended it 48h, confirmed the new `expiresAt` was exactly +48h from the
+  OLD value (not from now, since it hadn't expired yet); created a
+  ~3.6-second share, let it actually expire, extended it 24h, confirmed the
+  new `expiresAt` landed ~24h from `Date.now()` at extend-time, not from the
+  long-past stale expiry; extending a revoked share returned the exact
+  rejection message and left `expiresAt` untouched; extending one member of
+  a 2-video bundle by 500h correctly re-maxed the bundle's own `expiresAt`
+  to match; bulk extend with a mix of a valid token and nonexistent/garbage
+  tokens returned the valid one's success plus a `"Share not found"` failure
+  per bad token without affecting the good one. Middleware boundary
+  re-checked: both new routes 401 without admin creds;
+  `/api/watch/request-link` unaffected.
+- **Not yet exercised:** production deploy, and un-revoking a share was
+  deliberately left OUT of scope — extend refuses revoked records outright
+  rather than quietly doubling as an undo for Revoke, which should stay a
+  separate, explicit, and more carefully considered action if it's ever
+  added.
+
 ## 3. Positioning: standard vs actually nice
 
 Standard practice, competently applied (claim nothing): magic links, HMAC-SHA256

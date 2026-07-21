@@ -5,8 +5,9 @@ description: >
   recipient, and bundle-listing user journeys end-to-end (what happens
   server-side at each step), KV data conventions
   (bunnyshare:/gatethrottle:/bunnybundle:/bundlethrottle: keys), and the operating
-  runbook — revoke shares, inspect shares, run cleanup, rotate GATE_SECRET or
-  ADMIN_PASS, deploy to Vercel. Load this when running the app, answering "how
+  runbook — revoke shares, extend a share's expiry, resend, inspect shares,
+  run cleanup, rotate GATE_SECRET or ADMIN_PASS, deploy to Vercel. Load this
+  when running the app, answering "how
   does the flow work", or performing routine admin/ops tasks on a working
   deployment. Do NOT load for first-time environment/env-var setup
   (bunny-sharing-env-and-setup), for diagnosing failures
@@ -44,9 +45,9 @@ scripts exist.
 | `npm run build` | `next build` — production build with Turbopack (Next.js 16.2.10). **Needs NO env vars**: all config is read at request time, and `lib/gate.js`'s fail-loud `GATE_SECRET` check is runtime-only. Verified 2026-07-18: build succeeds in a shell with no `.env.local` and no env vars set. |
 | `npm run start` | `next start` — serves the production build on port 3000. Run `npm run build` first. This DOES need env vars to serve real traffic. |
 
-### Expected build output (as of 2026-07-20, next 16.2.10)
+### Expected build output (as of 2026-07-21, next 16.2.10)
 
-A healthy build prints this exact route manifest — 14 routes plus the
+A healthy build prints this exact route manifest — 16 routes plus the
 middleware line:
 
 ```
@@ -58,6 +59,8 @@ Route (pages)
 ├ ƒ /api/revoke
 ├ ƒ /api/share
 ├ ƒ /api/share-bulk
+├ ƒ /api/share/extend
+├ ƒ /api/share/extend-bulk
 ├ ƒ /api/share/resend
 ├ ƒ /api/share/resend-bulk
 ├ ƒ /api/shares
@@ -159,6 +162,20 @@ and `/watch/*` stay public). Never do it as a drive-by "fix the warning" edit.
    `POST /api/revoke` with `{token}`. Server side sets `revoked: true` on the
    record and writes it back — a flag flip, never a delete (invariant:
    reversible/auditable).
+6a. **Extend** (added 2026-07-21) — the Extend button appears on every
+   non-revoked row, Active OR Expired (unlike Revoke/Resend, which stay
+   Active-only — extending an already-expired-but-not-revoked share is the
+   main use case). Prompts for hours, then `POST /api/share/extend` with
+   `{token, hours}`. Server side (`extendOne`, `pages/api/share/extend.js`):
+   rejects a revoked record outright; otherwise sets
+   `expiresAt = Math.max(Date.now(), record.expiresAt) + hours*3600*1000` in
+   place — same token, same URL, same cookie. If the token belongs to a
+   bundle, that bundle's own `expiresAt` is re-maxed too
+   (`extendBundleForToken`, lib/bundles.js) so it doesn't lapse before this
+   member. The bulk-select checkboxes (shared with bulk Resend, see item 3
+   above) are also non-revoked-scoped, and an "Extend N" button sits next to
+   "Resend N" in the bulk bar → `POST /api/share/extend-bulk` with
+   `{tokens: [...], hours}` → `{succeeded, failures}` per token.
 7. **Cleanup** — the "Clean up expired & revoked" button confirms then
    `POST /api/cleanup`. Server side scans `bunnyshare:*` and DELETES every
    record that is revoked or past `expiresAt`; also scans `bunnybundle:*`
@@ -333,6 +350,27 @@ every request, so even a recipient holding a valid cookie is blocked on next
 load. Revoke does not delete the record (reversible by design — flipping the
 flag back via KV restores access, though no endpoint does that today).
 
+### Extend a share's expiry (added 2026-07-21)
+
+UI: `/` → Shared Links table → Extend button on any non-revoked row (Active
+or Expired). Or:
+
+```bash
+curl -u "$ADMIN_USER:$ADMIN_PASS" -X POST "$SITE/api/share/extend" \
+  -H "Content-Type: application/json" \
+  -d '{"token":"<32-hex-token>","hours":24}'
+```
+
+`{"ok":true,"expiresAt":<new-ms>}` on success. 404 for an unknown token; 400
+`{"error":"Cannot extend a revoked share"}` for a revoked one — extend never
+doubles as an un-revoke. Works on an already-expired share (extends from
+`Date.now()`, not the stale old expiry). Bulk form:
+`POST /api/share/extend-bulk` with `{"tokens":["<t1>","<t2>",...],"hours":24}`
+→ `{"succeeded":[{"token","expiresAt"}...],"failures":[{"token","error"}...]}`,
+one bad token never blocks the others. If the token is part of a bundle
+(lib/bundles.js), that bundle's own `expiresAt` is extended too, so its
+listing page doesn't lapse before this member does.
+
 ### Run cleanup manually
 
 ```bash
@@ -431,14 +469,16 @@ Every fact above was read from the repo at branch
 manifest, cleanup, bulk-share, and bundle (2c) sections were updated
 2026-07-20 alongside `lib/bundles.js`/`pages/bundle/[bundleId].js`, then
 updated again same day when bundles widened to one-per-email
-(`findOrExtendBundle`) and `/api/share.js` started participating too.
+(`findOrExtendBundle`) and `/api/share.js` started participating too. Item
+6a and the "Extend a share's expiry" runbook section added 2026-07-21 for
+`pages/api/share/extend.js`/`extend-bulk.js`.
 Re-verify
 before trusting, in one line each:
 
 | Claim | Re-verify with |
 | --- | --- |
 | npm scripts are exactly dev/build/start | `cat package.json` |
-| Route manifest (14 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
+| Route manifest (16 routes) + middleware deprecation warning | `npm run build` (compare output to section 1) |
 | Build needs no env vars | `env -i PATH="$PATH" HOME="$HOME" npm run build` in a checkout with no `.env.local` |
 | Basic Auth matcher / public routes | `cat middleware.js` (matcher at bottom, expect `(?!watch/\|bundle/)`) |
 | Share record fields + key prefix | `grep -n "bunnyshare" lib/shares.js pages/api/*.js pages/watch/*.js` and read `createShareRecord` in `lib/shares.js` |
