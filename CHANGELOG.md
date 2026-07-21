@@ -41,6 +41,17 @@ Three version tags mark points release notes were cut from this history:
 ## 2026-07-21
 
 ### Added
+- **Restore (un-revoke).** A revoked share can be flipped back to active from
+  the admin table — same token, URL, and cookie as before. New `/api/unrevoke`
+  route (admin-only), idempotent like Revoke, and kept as its own explicit
+  action rather than folded into Extend (which still refuses revoked shares
+  outright). Restoring an already-expired share brings back "Expired," not a
+  working link — pair with Extend if the recipient still needs access.
+- **Persistent bundle links in the admin table.** Every share belonging to a
+  bundle now shows a link to its bundle page directly in the shares table
+  (`/api/shares` looks up each token's bundle in one scan and attaches the
+  link), instead of the link only ever appearing once in the toast shown
+  right after sharing.
 - **Bulk revoke.** Select multiple shares in the admin table and revoke them
   all in one action; each link's outcome is reported independently so one
   bad token never blocks the rest. Revoke is now idempotent — revoking an

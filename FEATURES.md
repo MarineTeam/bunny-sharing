@@ -37,6 +37,11 @@ every page load, regardless of the bundle unlock — revoking one video is
 reflected instantly on the bundle page too, without touching the bundle
 record itself.
 
+Every share belonging to a bundle also shows a persistent "bundle page" link
+right in the admin table (under its `/watch/<token>` link), not just in the
+one-time success message shown right after sharing — so the link is easy to
+find again later without re-sharing or digging through old messages.
+
 ## Access control
 
 ### Email-gated links
@@ -113,8 +118,15 @@ blocks the rest):
   the old expiry. Refuses to extend a revoked share, so it can never
   quietly double as an "un-revoke." If the share belongs to a bundle, the
   bundle's own expiry is extended to match.
-- **Revoke** — immediately cut off access. Reversible by flag (not a
-  delete) and idempotent.
+- **Revoke** — immediately cut off access. A flag flip, not a delete, and
+  idempotent (revoking an already-revoked share is a no-op success).
+- **Restore** — undo a Revoke: flips the flag back, same token/URL/cookie as
+  before. Only ever available on a revoked row, and is its own explicit
+  action — kept separate from Extend on purpose, so recovering time on a
+  live share and undoing a deliberate access cutoff can never be confused
+  with each other. Idempotent, same as Revoke. Restoring an already-expired
+  share brings back the "Expired" state, not a working link — pair it with
+  Extend if the recipient still needs access.
 
 ## Delivery failure handling
 

@@ -208,10 +208,8 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   creds. Anti-enumeration uniformity re-checked for the new endpoint
   (right/wrong/nonexistent-bundle all byte-identical responses).
 - **Not yet exercised:** production deploy (P4-style, real https +
-  Secure-cookie flag), and the admin UI only surfaces bundle links in the
-  bulk-share success toast — there's no persistent "view bundle link" button
-  in the shares table the way Revoke/Resend have one. Low priority; the link
-  is already in the recipient's email and in the API response.
+  Secure-cookie flag). The "no persistent bundle link in the shares table"
+  gap noted here originally was closed 2026-07-21 — see item (k).
 - **Follow-up 2026-07-20 (same day) — one bundle per email, not per call:**
   requirement: "if they are the same email, they should be in the same
   email" — repeat shares to a recipient (from any endpoint, in any order)
@@ -322,6 +320,45 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   meaningfully different, riskier action (silently restoring access someone
   deliberately cut off) and was left out of scope on purpose, same reasoning
   as item i's decision not to let Extend double as an undo for Revoke.
+
+### (k) Restore (un-revoke) + persistent bundle link in admin table — ADOPTED 2026-07-21
+- **Was:** two gaps left open by prior entries as deliberately out of scope
+  or noted as low priority: (1) items (i) and (j) both refused to let Extend
+  or bulk-revoke double as an "un-revoke," leaving no way to undo an
+  accidental Revoke short of re-sharing (a new token, breaking the old
+  link); (2) item (h) noted the bundle link only ever surfaced once, in the
+  bulk-share success toast, with no durable place to find it again.
+- **What shipped:** `unrevokeOne(token)` (`pages/api/unrevoke.js`, mirroring
+  `revokeOne`'s shape) flips `revoked` back to `false` — same flag-flip,
+  never-delete model as Revoke (non-negotiable 9), idempotent the same way.
+  Kept as its own single-token endpoint, deliberately NOT folded into Extend
+  or given a bulk form yet, for the same reasoning items (i)/(j) gave for
+  leaving it out: restoring cut-off access is a more consequential action
+  than extending or revoking, and shouldn't ride along with either as a
+  side effect. Admin UI: a "Restore" button appears only on revoked rows.
+  Separately, `bundleLinksForTokens(tokens, siteUrl)` (`lib/bundles.js`)
+  scans `bunnybundle:*` ONCE and maps every token in the list to its
+  bundle's link, rather than one scan per token; `/api/shares.js` calls it
+  for the whole listing and attaches `bundleLink` to each record in the
+  response only (not stored on the `bunnyshare:*` record itself). Admin UI
+  shows it as a small "bundle page" link under the `/watch/<token>` link on
+  any row that has one, always visible regardless of that share's own
+  Active/Expired/Revoked status.
+- **Verified:** L0 only so far (`npm run build` clean; `/api/unrevoke`
+  registered; invariant greps re-run: matcher unchanged, `bunnyshare:`
+  prefix unchanged, no stray bare `share:` keys, `revoked = true`/`revoked:
+  false` both present with no `kvDel`, cookie name/path unchanged). No live
+  L2/L3 pass yet against the mock KV/SMTP harness — unlike items (f) through
+  (j), this entry has NOT been exercised end-to-end with real records.
+- **Not yet exercised:** a live pass proving (a) a revoked share's Restore
+  button brings it back to exactly its pre-revoke state and an already-
+  expired-and-revoked share restores to "Expired" (not a working link,
+  since Restore doesn't touch `expiresAt`); (b) a share belonging to a
+  2+-member bundle shows the same bundle link as its siblings in the admin
+  table; (c) a share NOT in any bundle shows no bundle link and the API
+  response for it is byte-identical to before this change (no stray
+  `bundleLink: undefined` key). Also: no bulk Restore, and production
+  deploy, both deliberately out of scope for the reasons above.
 
 ## 3. Positioning: standard vs actually nice
 

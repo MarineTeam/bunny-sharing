@@ -217,6 +217,19 @@ export default function Admin() {
     loadAll();
   }
 
+  async function unrevoke(token) {
+    if (!confirm("Restore this revoked link?")) return;
+    setMessage("Restoring...");
+    const res = await fetch("/api/unrevoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? "Link restored" : `Error: ${data.error}`);
+    loadAll();
+  }
+
   async function resend(token) {
     setMessage("Resending...");
     const res = await fetch("/api/share/resend", {
@@ -611,6 +624,13 @@ export default function Admin() {
                   <a href={`/watch/${s.token}`} target="_blank" rel="noreferrer" style={{ fontSize: 13, wordBreak: "break-all" }}>
                     /watch/{s.token}
                   </a>
+                  {s.bundleLink && (
+                    <div>
+                      <a href={s.bundleLink} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: "#57606a" }}>
+                        bundle page
+                      </a>
+                    </div>
+                  )}
                 </td>
                 <td>
                   {statusOf(s)}
@@ -641,6 +661,11 @@ export default function Admin() {
                   {active && (
                     <button onClick={() => revoke(s.token)} style={styles.btnDanger}>
                       Revoke
+                    </button>
+                  )}
+                  {s.revoked && (
+                    <button onClick={() => unrevoke(s.token)} style={styles.btn}>
+                      Restore
                     </button>
                   )}
                 </td>
