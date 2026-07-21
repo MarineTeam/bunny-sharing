@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { kvGet, kvSet } from "../../lib/kv";
 import { generateEmbedUrl } from "../../lib/bunny";
 import { signGrant, verifyGrant } from "../../lib/gate";
-import { getSettings, resolveWatermark } from "../../lib/settings";
+import { getSettings, getVideoWatermark, resolveWatermark } from "../../lib/settings";
 
 export default function WatchPage({
   status,
@@ -396,6 +396,7 @@ export async function getServerSideProps({ params, query, req, res }) {
       settings,
       recipientEmail: record.email,
       shareWatermark: record.watermark,
+      videoWatermark: getVideoWatermark(settings, record.videoId),
     });
 
     return {

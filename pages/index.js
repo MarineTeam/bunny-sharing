@@ -24,6 +24,8 @@ export default function Admin() {
   const [wmDefault, setWmDefault] = useState(false);
   const [wmEmails, setWmEmails] = useState("");
   const [wmDomains, setWmDomains] = useState("");
+  // Per-video watermark overrides, keyed by video id -> boolean.
+  const [wmByVideo, setWmByVideo] = useState({});
   const [savingSettings, setSavingSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -63,6 +65,29 @@ export default function Admin() {
     setWmDefault(!!s.watermarkDefault);
     setWmEmails((s.watermarkExemptEmails || []).join(", "));
     setWmDomains((s.watermarkExemptDomains || []).join(", "));
+    setWmByVideo(s.watermarkByVideo || {});
+  }
+
+  // Current per-video override as a select value: "on" / "off" / "default".
+  function videoWmChoice(videoId) {
+    const v = wmByVideo[videoId];
+    return v === true ? "on" : v === false ? "off" : "default";
+  }
+
+  async function setVideoWatermark(videoId, choice) {
+    setMessage("Updating watermark...");
+    const res = await fetch("/api/video-watermark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoId, choice }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setWmByVideo(data.settings.watermarkByVideo || {});
+      setMessage("Watermark updated");
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
   }
 
   // "default" → omit the field (JSON.stringify drops undefined) so the share
@@ -350,9 +375,10 @@ export default function Admin() {
             />
           </label>
           <p style={styles.hint}>
-            Resolution order: an exempt viewer is never watermarked; otherwise a
-            share's own Always/Never wins; otherwise this default. Set a share's
-            own choice in the Share form. Note: the watermark is a client-side
+            Resolution order (most specific wins): an exempt viewer is never
+            watermarked; otherwise a share's own Always/Never (Share form) wins;
+            otherwise the video's own Always/Never (select on each Videos row);
+            otherwise this global default. Note: the watermark is a client-side
             overlay for leak attribution, not burned into the video — it deters
             casual re-sharing, it isn't DRM.
           </p>
@@ -454,6 +480,17 @@ export default function Admin() {
                 Select
               </label>
               <strong>{v.title}</strong>
+              <label style={styles.videoWmLabel}>
+                Watermark:{" "}
+                <select
+                  value={videoWmChoice(v.id)}
+                  onChange={(e) => setVideoWatermark(v.id, e.target.value)}
+                >
+                  <option value="default">Default</option>
+                  <option value="on">Always</option>
+                  <option value="off">Never</option>
+                </select>
+              </label>
               <div>
                 <button onClick={() => setShareForVideo(v)} style={styles.btn}>
                   Share
@@ -678,6 +715,7 @@ const styles = {
   message: { color: "#1f6feb" },
   bulkBar: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, marginBottom: 16, border: "1px solid #1f6feb", background: "#eef4ff", borderRadius: 8 },
   selectLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4, cursor: "pointer" },
+  videoWmLabel: { display: "block", fontSize: 12, color: "#57606a", margin: "6px 0" },
   emailFailedBadge: { fontSize: 12, color: "#d1242f" },
   panelToggles: { display: "flex", gap: 10, margin: "8px 0 4px" },
   panel: { border: "1px solid #d0d7de", borderRadius: 8, padding: 16, margin: "8px 0 20px", background: "#f6f8fa" },

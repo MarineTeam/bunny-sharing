@@ -477,15 +477,22 @@ flag); this is the only code path that deletes them.
 A single global record holding app-level admin settings (`lib/settings.js`),
 in its own namespace that never collides with `bunnyshare:*`/`bunnybundle:*`.
 Read on every authorized watch render (for the watermark decision) and by the
-admin `/api/settings` route (GET/POST, behind the middleware matcher like any
-non-`watch/`/`bundle/` API route). Fields: `watermarkDefault` (boolean),
-`watermarkExemptEmails` (string[]), `watermarkExemptDomains` (string[]). Absent
-record → `DEFAULTS` (watermark off, no exemptions), so the app behaves exactly
-as pre-settings until an admin saves. Not deleted by cleanup — it is
-configuration, not per-share data. The watermark decision itself is
-`resolveWatermark({settings, recipientEmail, shareWatermark})`: exemption
-(email or domain) wins, then the per-share `record.watermark` override, then
-`watermarkDefault`.
+admin `/api/settings` route (GET/POST) and `/api/video-watermark` route (POST,
+sets one video's override), both behind the middleware matcher like any
+non-`watch/`/`bundle/` API route. Fields: `watermarkDefault` (boolean),
+`watermarkExemptEmails` (string[]), `watermarkExemptDomains` (string[]), and
+`watermarkByVideo` (object, Bunny videoId → boolean — per-video overrides;
+videos have no KV record of their own, so their override lives here; an absent
+key means inherit). Absent record → `DEFAULTS` (watermark off, no exemptions,
+empty map), so the app behaves exactly as pre-settings until an admin saves.
+Not deleted by cleanup — it is configuration, not per-share data. The watermark
+decision itself is `resolveWatermark({settings, recipientEmail, shareWatermark,
+videoWatermark})`, most-specific-wins: exemption (email or domain) wins, then
+the per-share `record.watermark` override, then the per-video override
+(`getVideoWatermark(settings, videoId)`), then `watermarkDefault`. Note
+`saveSettings` preserves `watermarkByVideo` when a patch omits it, so a Settings
+-form save never clobbers per-video overrides set from the Videos grid (and vice
+versa via `setVideoWatermark`).
 
 ### 5.2 Grant string — `lib/gate.js`
 

@@ -71,21 +71,25 @@ control of a specific inbox to get in, a leaked screen-recording carries the
 email of whoever leaked it — a deterrent against casual re-sharing and a way
 to attribute leaks.
 
-Control is layered, resolved per view:
+Control is layered, resolved per view (most specific wins):
 
-- **Global default** — a toggle in the admin **Settings** panel turns
-  watermarking on for every player by default.
-- **Per-share override** — the Share form offers a Default / Always / Never
-  choice, so you can force a watermark on an especially sensitive video (or
-  off on a routine one) regardless of the global default.
-- **Exemptions** — lists of exempt email addresses and exempt domains (also
-  in Settings) that are *never* watermarked, however the above resolve. This
-  is how you exempt internal viewers such as admins or reviewers in an app
-  that has no user accounts: by the email or domain they verify with.
+- **Exemptions** — lists of exempt email addresses and exempt domains
+  (Settings) that are *never* watermarked, however everything below resolves.
+  This is how you exempt internal viewers such as admins or reviewers in an
+  app that has no user accounts: by the email or domain they verify with.
+  Exemption always wins.
+- **Per-share override** — the single and bulk Share forms offer a Default /
+  Always / Never choice, so you can force a watermark on (or off) for a
+  specific link regardless of the video's or the global setting.
+- **Per-video override** — a Default / Always / Never select on each row of
+  the Videos grid, so a whole video can default to watermarked (or not)
+  without setting it on every share. Stored per Bunny video id.
+- **Global default** — a toggle in the admin **Settings** panel that applies
+  to any share/video with no override of its own.
 
-Resolution order is **exemption → per-share → global default** — an exempt
-viewer is never watermarked; otherwise a share's own Always/Never wins;
-otherwise the global default applies.
+Resolution order is **exemption → per-share → per-video → global default**:
+an exempt viewer is never watermarked; otherwise a share's own Always/Never
+wins; otherwise the video's own Always/Never; otherwise the global default.
 
 Honest limitation: the watermark is a client-side overlay drawn over the
 (cross-origin) player, not burned into the video's pixels — doing that would

@@ -16,10 +16,11 @@ Two version tags mark points release notes were cut from this history:
   overlaid across the video (tiled, plus one drifting copy so a fixed crop
   can't remove every instance) to deter casual re-sharing and attribute a
   leaked screen-recording to one person. Layered control: a global default
-  (admin Settings panel), a per-share Always/Never override (Share form), and
-  an exemption list of emails/domains that are never watermarked (e.g. internal
-  admins/reviewers). Resolution order is exemption → per-share → global
-  default. Honest limit: it's a client-side overlay over the cross-origin
+  (admin Settings panel), a per-share Always/Never override (single + bulk
+  Share forms), a per-video Always/Never override (select on each Videos row),
+  and an exemption list of emails/domains that are never watermarked (e.g.
+  internal admins/reviewers). Resolution order is exemption → per-share →
+  per-video → global default. Honest limit: it's a client-side overlay over the cross-origin
   player, not burned into the video pixels — it raises effort and attributes
   leaks, it is not DRM.
 - **Per-video analytics.** A collapsible admin panel rolls the existing
