@@ -127,6 +127,13 @@ blocks the rest):
   with each other. Idempotent, same as Revoke. Restoring an already-expired
   share brings back the "Expired" state, not a working link — pair it with
   Extend if the recipient still needs access.
+- **Delete permanently** — also only available on a revoked row, this
+  actually removes the share record instead of just flagging it, so Restore
+  is no longer possible afterward. It's the same deletion `/api/cleanup`
+  already does for revoked/expired records, just on demand for one link.
+  Requires the share to already be revoked — there's no one-click delete
+  from Active, on purpose, so this is always a deliberate second step after
+  Revoke, not a shortcut around it.
 
 ## Delivery failure handling
 

@@ -230,6 +230,19 @@ export default function Admin() {
     loadAll();
   }
 
+  async function deletePermanently(token) {
+    if (!confirm("Permanently delete this revoked link? This cannot be undone — Restore will no longer be possible.")) return;
+    setMessage("Deleting...");
+    const res = await fetch("/api/revoke-permanent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+    const data = await res.json();
+    setMessage(data.ok ? "Link permanently deleted" : `Error: ${data.error}`);
+    loadAll();
+  }
+
   async function resend(token) {
     setMessage("Resending...");
     const res = await fetch("/api/share/resend", {
@@ -666,6 +679,11 @@ export default function Admin() {
                   {s.revoked && (
                     <button onClick={() => unrevoke(s.token)} style={styles.btn}>
                       Restore
+                    </button>
+                  )}
+                  {s.revoked && (
+                    <button onClick={() => deletePermanently(s.token)} style={styles.btnDanger}>
+                      Delete permanently
                     </button>
                   )}
                 </td>

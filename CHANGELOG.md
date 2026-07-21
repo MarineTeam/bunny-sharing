@@ -41,6 +41,13 @@ Three version tags mark points release notes were cut from this history:
 ## 2026-07-21
 
 ### Added
+- **Delete permanently.** A revoked share can now be deleted outright from
+  the admin table — the same deletion `/api/cleanup` already does in bulk
+  for revoked/expired records, just on demand for one link via the new
+  `/api/revoke-permanent` route. Only allowed once a share is already
+  revoked (no one-click delete from Active), so it's always a deliberate
+  second step after Revoke, and it makes Restore impossible afterward —
+  the record is gone, not just flagged.
 - **Restore (un-revoke).** A revoked share can be flipped back to active from
   the admin table — same token, URL, and cookie as before. New `/api/unrevoke`
   route (admin-only), idempotent like Revoke, and kept as its own explicit

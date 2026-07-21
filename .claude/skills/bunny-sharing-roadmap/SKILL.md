@@ -359,6 +359,32 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   response for it is byte-identical to before this change (no stray
   `bundleLink: undefined` key). Also: no bulk Restore, and production
   deploy, both deliberately out of scope for the reasons above.
+- **Follow-up 2026-07-21 (same day) — Delete permanently:** requirement
+  ("still have option to permanently revoke after that soft revoke") —
+  Restore made Revoke fully reversible, so a separate irreversible option
+  was added back for when that's actually wanted. `permanentlyDeleteOne`
+  (`pages/api/revoke-permanent.js`) requires `record.revoked === true`
+  (rejects with `"Only a revoked share can be permanently deleted"`
+  otherwise) and then `kvDel`s the `bunnyshare:<token>` record — the exact
+  same deletion `/api/cleanup.js` already performs in bulk for
+  revoked-or-expired records, just on-demand for one token. This does NOT
+  touch non-negotiable 9 (Revoke itself stays a flag flip): it's a distinct
+  second action, only reachable from an already-revoked row, so there's no
+  one-click path from Active straight to deletion. A bundle referencing the
+  deleted token isn't updated — `getBundleMembers`/`getBundleItems`
+  already treat a missing member record as "skip it," identical to what
+  happens today when cleanup deletes a bundled share. Admin UI: a "Delete
+  permanently" button appears next to Restore, only on revoked rows, with
+  a confirm() that says the action is irreversible.
+- **Not yet exercised:** same gap as the entry above — L0 only (build clean,
+  route registered, invariant greps re-run: matcher unchanged, `revoke.js`
+  still flag-only with no `kvDel`, `cleanup.js`'s deletion logic
+  untouched). No live pass proving (a) deleting an active (non-revoked)
+  share is refused; (b) deleting a revoked share removes it from
+  `/api/shares` and its token starts 404ing appropriately at `/watch/<token>`
+  the same way a cleaned-up record does; (c) a deleted share that belonged
+  to a bundle simply disappears from that bundle's listing page rather than
+  erroring it.
 
 ## 3. Positioning: standard vs actually nice
 
