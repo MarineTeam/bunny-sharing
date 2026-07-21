@@ -418,6 +418,9 @@ over the Upstash REST API (`lib/kv.js:19-22`).
 | `completedAt` | number (optional) | Unix ms of first `ended` event; additive |
 | `emailFailed` | boolean (optional) | Set `true` by `share.js`/`share-bulk.js` when the notification email failed to send (record still created; link still live). Set via `setEmailFailed` (lib/shares.js), which stores `undefined` (dropped from JSON, not written as `false`) to clear it rather than leaving a stale flag — absence means "no known failure", not "definitely sent" |
 | `emailError` | string (optional) | The failed send's error message, for the admin table tooltip; cleared alongside `emailFailed` |
+| `watermark` | boolean (optional) | Per-share watermark override (added post-1.1.0). Stored ONLY when explicitly `true`/`false`; ABSENT means "inherit the global default". Read by `resolveWatermark` (lib/settings.js) on the authorized watch render. Additive — absent on all older records, which inherit exactly as before |
+| `lastPositionSec` | number (optional) | Resume support (added post-1.1.0): furthest/most-recent playback position in seconds, written by `/api/watch/track` on the `position` event. Additive; last-writer-wins |
+| `durationSec` | number (optional) | Video duration in seconds, reported alongside `lastPositionSec`; lets the watch page suppress a resume offer near the end. Additive |
 
 View fields are written by `pages/watch/[token].js` only on the AUTHORIZED
 branch (valid cookie grant → embed render) — never for the email form or a
@@ -468,6 +471,28 @@ Auxiliary key: `bundlethrottle:<bundleId>` — same shape and purpose as
 `pages/api/cleanup.js` deletes `bunnybundle:*` records once
 `Date.now() > record.expiresAt` (no `revoked` check — bundles have no such
 flag); this is the only code path that deletes them.
+
+### 5.1b Settings record — KV key `bunnysettings:global` (added post-1.1.0)
+
+A single global record holding app-level admin settings (`lib/settings.js`),
+in its own namespace that never collides with `bunnyshare:*`/`bunnybundle:*`.
+Read on every authorized watch render (for the watermark decision) and by the
+admin `/api/settings` route (GET/POST) and `/api/video-watermark` route (POST,
+sets one video's override), both behind the middleware matcher like any
+non-`watch/`/`bundle/` API route. Fields: `watermarkDefault` (boolean),
+`watermarkExemptEmails` (string[]), `watermarkExemptDomains` (string[]), and
+`watermarkByVideo` (object, Bunny videoId → boolean — per-video overrides;
+videos have no KV record of their own, so their override lives here; an absent
+key means inherit). Absent record → `DEFAULTS` (watermark off, no exemptions,
+empty map), so the app behaves exactly as pre-settings until an admin saves.
+Not deleted by cleanup — it is configuration, not per-share data. The watermark
+decision itself is `resolveWatermark({settings, recipientEmail, shareWatermark,
+videoWatermark})`, most-specific-wins: exemption (email or domain) wins, then
+the per-share `record.watermark` override, then the per-video override
+(`getVideoWatermark(settings, videoId)`), then `watermarkDefault`. Note
+`saveSettings` preserves `watermarkByVideo` when a patch omits it, so a Settings
+-form save never clobbers per-video overrides set from the Videos grid (and vice
+versa via `setVideoWatermark`).
 
 ### 5.2 Grant string — `lib/gate.js`
 

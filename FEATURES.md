@@ -63,6 +63,40 @@ idempotent: revoking an already-revoked link succeeds without complaint.
 Requesting a magic link for the same share is throttled to one per 30
 seconds, so the gate can't be used to spam a recipient's inbox.
 
+## Watermarking
+
+Optionally overlay the recipient's verified email address across the video
+player as a drifting, tiled watermark. Because every viewer has proven
+control of a specific inbox to get in, a leaked screen-recording carries the
+email of whoever leaked it — a deterrent against casual re-sharing and a way
+to attribute leaks.
+
+Control is layered, resolved per view (most specific wins):
+
+- **Exemptions** — lists of exempt email addresses and exempt domains
+  (Settings) that are *never* watermarked, however everything below resolves.
+  This is how you exempt internal viewers such as admins or reviewers in an
+  app that has no user accounts: by the email or domain they verify with.
+  Exemption always wins.
+- **Per-share override** — the single and bulk Share forms offer a Default /
+  Always / Never choice, so you can force a watermark on (or off) for a
+  specific link regardless of the video's or the global setting.
+- **Per-video override** — a Default / Always / Never select on each row of
+  the Videos grid, so a whole video can default to watermarked (or not)
+  without setting it on every share. Stored per Bunny video id.
+- **Global default** — a toggle in the admin **Settings** panel that applies
+  to any share/video with no override of its own.
+
+Resolution order is **exemption → per-share → per-video → global default**:
+an exempt viewer is never watermarked; otherwise a share's own Always/Never
+wins; otherwise the video's own Always/Never; otherwise the global default.
+
+Honest limitation: the watermark is a client-side overlay drawn over the
+(cross-origin) player, not burned into the video's pixels — doing that would
+require per-view server-side transcoding the video host doesn't expose here.
+A determined viewer can remove the overlay with browser dev tools. It raises
+the effort of a clean leak and attributes the casual ones; it is not DRM.
+
 ## Admin actions
 
 Every share in the admin table supports these actions, individually or in
@@ -107,6 +141,23 @@ tell "opened" from "actually watched."
 
 Shown in the Watched column as `—` (never played) / `started` / `NN%` /
 `100% ✓`.
+
+### Per-video analytics
+A collapsible **Analytics** panel on the admin page rolls the per-share
+tracking above up per video: how many times it was shared, to how many
+distinct recipients, total views, how many recipients started it, how many
+completed it (with the completion rate), and the average furthest progress.
+It's computed entirely from the tracking already stored on each share — no
+extra data is collected for it.
+
+## Resume playback
+
+A recipient who watches part of a video and returns later is offered
+"Resume from *m:ss*" (or "Start over") instead of restarting from zero. The
+player reports a throttled playback position while watching, and the watch
+page seeks to it on request. The offer is suppressed when the saved point is
+effectively the end of the video, so someone who finished doesn't get asked
+to resume at the credits.
 
 ## Email delivery
 

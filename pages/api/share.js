@@ -6,7 +6,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
 
   try {
-    const { videoId, videoTitle, email, hours } = req.body;
+    const { videoId, videoTitle, email, hours, watermark } = req.body;
     const recipients = parseEmails(email);
     if (!videoId || recipients.length === 0) {
       return res.status(400).json({ error: "videoId and email are required" });
@@ -24,6 +24,7 @@ export default async function handler(req, res) {
         email: to,
         hours,
         siteUrl,
+        watermark: typeof watermark === "boolean" ? watermark : undefined,
       });
 
       // Every recipient gets (or extends) a bundle, so a later share to the

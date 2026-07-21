@@ -16,6 +16,19 @@ export default function Admin() {
   const [resendingBulk, setResendingBulk] = useState(false);
   const [extendingBulk, setExtendingBulk] = useState(false);
   const [revokingBulk, setRevokingBulk] = useState(false);
+  // Per-share watermark override chosen in the share forms: "default" (inherit
+  // the global setting), "on" (always), or "off" (never).
+  const [watermark, setWatermark] = useState("default");
+  const [bulkWatermark, setBulkWatermark] = useState("default");
+  // Global watermark settings (edited in the Settings panel below).
+  const [wmDefault, setWmDefault] = useState(false);
+  const [wmEmails, setWmEmails] = useState("");
+  const [wmDomains, setWmDomains] = useState("");
+  // Per-video watermark overrides, keyed by video id -> boolean.
+  const [wmByVideo, setWmByVideo] = useState({});
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   function toggleSelected(id) {
     setSelected((prev) => {
@@ -37,13 +50,72 @@ export default function Admin() {
 
   async function loadAll() {
     setLoading(true);
-    const [vRes, sRes] = await Promise.all([
+    const [vRes, sRes, setRes] = await Promise.all([
       fetch("/api/videos").then((r) => r.json()),
       fetch("/api/shares").then((r) => r.json()),
+      fetch("/api/settings").then((r) => r.json()).catch(() => ({})),
     ]);
     setVideos(vRes.videos || []);
     setShares(sRes.shares || []);
+    if (setRes && setRes.settings) applySettings(setRes.settings);
     setLoading(false);
+  }
+
+  function applySettings(s) {
+    setWmDefault(!!s.watermarkDefault);
+    setWmEmails((s.watermarkExemptEmails || []).join(", "));
+    setWmDomains((s.watermarkExemptDomains || []).join(", "));
+    setWmByVideo(s.watermarkByVideo || {});
+  }
+
+  // Current per-video override as a select value: "on" / "off" / "default".
+  function videoWmChoice(videoId) {
+    const v = wmByVideo[videoId];
+    return v === true ? "on" : v === false ? "off" : "default";
+  }
+
+  async function setVideoWatermark(videoId, choice) {
+    setMessage("Updating watermark...");
+    const res = await fetch("/api/video-watermark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ videoId, choice }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      setWmByVideo(data.settings.watermarkByVideo || {});
+      setMessage("Watermark updated");
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
+  // "default" → omit the field (JSON.stringify drops undefined) so the share
+  // inherits the global setting; "on"/"off" → an explicit per-share override.
+  function wmValue(sel) {
+    return sel === "on" ? true : sel === "off" ? false : undefined;
+  }
+
+  async function saveSettings() {
+    setSavingSettings(true);
+    setMessage("Saving settings...");
+    const res = await fetch("/api/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        watermarkDefault: wmDefault,
+        watermarkExemptEmails: wmEmails,
+        watermarkExemptDomains: wmDomains,
+      }),
+    });
+    const data = await res.json();
+    setSavingSettings(false);
+    if (data.ok) {
+      applySettings(data.settings);
+      setMessage("Settings saved");
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
   }
 
   useEffect(() => {
@@ -60,6 +132,7 @@ export default function Admin() {
         videoTitle: video.title,
         email,
         hours,
+        watermark: wmValue(watermark),
       }),
     });
     const data = await res.json();
@@ -76,6 +149,7 @@ export default function Admin() {
       setMessage(msg);
       setShareForVideo(null);
       setEmail("");
+      setWatermark("default");
       loadAll();
     } else {
       setMessage(`Error: ${data.error}`);
@@ -95,6 +169,7 @@ export default function Admin() {
         videos: chosen.map((v) => ({ id: v.id, title: v.title })),
         emails,
         hours: bulkHours,
+        watermark: wmValue(bulkWatermark),
       }),
     });
     const data = await res.json();
@@ -254,10 +329,102 @@ export default function Admin() {
 
   if (loading) return <p style={{ padding: 20 }}>Loading...</p>;
 
+  const analytics = computeAnalytics(shares);
+
   return (
     <div style={styles.wrap}>
       <h1>Video Library</h1>
       {message && <p style={styles.message}>{message}</p>}
+
+      <div style={styles.panelToggles}>
+        <button onClick={() => setShowSettings((v) => !v)} style={styles.btnSecondary}>
+          {showSettings ? "Hide settings" : "⚙ Settings"}
+        </button>
+        <button onClick={() => setShowAnalytics((v) => !v)} style={styles.btnSecondary}>
+          {showAnalytics ? "Hide analytics" : "📊 Analytics"}
+        </button>
+      </div>
+
+      {showSettings && (
+        <div style={styles.panel}>
+          <h3 style={{ marginTop: 0 }}>Watermark settings</h3>
+          <label style={{ display: "block", marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={wmDefault}
+              onChange={(e) => setWmDefault(e.target.checked)}
+            />{" "}
+            Watermark the viewer's email over every player by default
+          </label>
+          <label style={styles.settingLabel}>
+            Exempt emails — never watermarked (comma/space separated)
+            <textarea
+              value={wmEmails}
+              onChange={(e) => setWmEmails(e.target.value)}
+              placeholder="admin@you.com, reviewer@you.com"
+              style={styles.textarea}
+            />
+          </label>
+          <label style={styles.settingLabel}>
+            Exempt domains — never watermarked (e.g. your internal domain)
+            <textarea
+              value={wmDomains}
+              onChange={(e) => setWmDomains(e.target.value)}
+              placeholder="yourcompany.com"
+              style={styles.textarea}
+            />
+          </label>
+          <p style={styles.hint}>
+            Resolution order (most specific wins): an exempt viewer is never
+            watermarked; otherwise a share's own Always/Never (Share form) wins;
+            otherwise the video's own Always/Never (select on each Videos row);
+            otherwise this global default. Note: the watermark is a client-side
+            overlay for leak attribution, not burned into the video — it deters
+            casual re-sharing, it isn't DRM.
+          </p>
+          <button onClick={saveSettings} disabled={savingSettings} style={styles.btn}>
+            {savingSettings ? "Saving..." : "Save settings"}
+          </button>
+        </div>
+      )}
+
+      {showAnalytics && (
+        <div style={styles.panel}>
+          <h3 style={{ marginTop: 0 }}>Per-video analytics</h3>
+          {analytics.length === 0 ? (
+            <p style={styles.hint}>No shares yet.</p>
+          ) : (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.thLeft}>Video</th>
+                  <th>Shares</th>
+                  <th>Recipients</th>
+                  <th>Views</th>
+                  <th>Started</th>
+                  <th>Completed</th>
+                  <th>Avg progress</th>
+                </tr>
+              </thead>
+              <tbody>
+                {analytics.map((a) => (
+                  <tr key={a.videoId}>
+                    <td>{a.title}</td>
+                    <td style={styles.tdCenter}>{a.shares}</td>
+                    <td style={styles.tdCenter}>{a.recipients}</td>
+                    <td style={styles.tdCenter}>{a.views}</td>
+                    <td style={styles.tdCenter}>{a.started}</td>
+                    <td style={styles.tdCenter}>
+                      {a.completed} ({a.completionRate}%)
+                    </td>
+                    <td style={styles.tdCenter}>{a.avgProgress ? `${a.avgProgress}%` : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
 
       {selected.size > 0 && (
         <div style={styles.bulkBar}>
@@ -277,6 +444,14 @@ export default function Admin() {
               onChange={(e) => setBulkHours(e.target.value)}
               style={{ width: 70 }}
             />
+          </label>
+          <label style={{ whiteSpace: "nowrap" }}>
+            Watermark:{" "}
+            <select value={bulkWatermark} onChange={(e) => setBulkWatermark(e.target.value)}>
+              <option value="default">Default</option>
+              <option value="on">Always</option>
+              <option value="off">Never</option>
+            </select>
           </label>
           <button
             onClick={submitBulk}
@@ -305,6 +480,17 @@ export default function Admin() {
                 Select
               </label>
               <strong>{v.title}</strong>
+              <label style={styles.videoWmLabel}>
+                Watermark:{" "}
+                <select
+                  value={videoWmChoice(v.id)}
+                  onChange={(e) => setVideoWatermark(v.id, e.target.value)}
+                >
+                  <option value="default">Default</option>
+                  <option value="on">Always</option>
+                  <option value="off">Never</option>
+                </select>
+              </label>
               <div>
                 <button onClick={() => setShareForVideo(v)} style={styles.btn}>
                   Share
@@ -333,6 +519,14 @@ export default function Admin() {
               onChange={(e) => setHours(e.target.value)}
               style={{ width: 80 }}
             />
+          </div>
+          <div style={{ marginTop: 8 }}>
+            <label>Watermark viewer's email: </label>
+            <select value={watermark} onChange={(e) => setWatermark(e.target.value)}>
+              <option value="default">Default (global setting)</option>
+              <option value="on">Always</option>
+              <option value="off">Never</option>
+            </select>
           </div>
           <div style={{ marginTop: 12 }}>
             <button onClick={() => submitShare(shareForVideo)} style={styles.btn}>
@@ -399,7 +593,19 @@ export default function Admin() {
                     />
                   )}
                 </td>
-                <td>{s.videoTitle}</td>
+                <td>
+                  {s.videoTitle}
+                  {s.watermark === true && (
+                    <span style={styles.wmBadge} title="Watermark: always on for this share">
+                      💧
+                    </span>
+                  )}
+                  {s.watermark === false && (
+                    <span style={styles.wmBadgeOff} title="Watermark: off for this share">
+                      no-wm
+                    </span>
+                  )}
+                </td>
                 <td>{s.email}</td>
                 <td>
                   <a href={`/watch/${s.token}`} target="_blank" rel="noreferrer" style={{ fontSize: 13, wordBreak: "break-all" }}>
@@ -447,6 +653,53 @@ export default function Admin() {
   );
 }
 
+// Rolls the per-share tracking fields up per video for the Analytics panel.
+// Reads only additive fields already present on records (viewCount, playCount,
+// maxProgressPct, completedAt) — nothing new is stored for this.
+function computeAnalytics(shares) {
+  const byVideo = new Map();
+  for (const s of shares) {
+    const key = s.videoId;
+    let a = byVideo.get(key);
+    if (!a) {
+      a = {
+        videoId: key,
+        title: s.videoTitle || key,
+        shares: 0,
+        recipients: new Set(),
+        views: 0,
+        started: 0,
+        completed: 0,
+        progressSum: 0,
+        progressCount: 0,
+      };
+      byVideo.set(key, a);
+    }
+    a.shares += 1;
+    if (s.email) a.recipients.add(String(s.email).toLowerCase());
+    a.views += s.viewCount || 0;
+    if (s.playCount || s.maxProgressPct || s.completedAt) a.started += 1;
+    if (s.completedAt) a.completed += 1;
+    if (s.maxProgressPct) {
+      a.progressSum += s.maxProgressPct;
+      a.progressCount += 1;
+    }
+  }
+  return [...byVideo.values()]
+    .map((a) => ({
+      videoId: a.videoId,
+      title: a.title,
+      shares: a.shares,
+      recipients: a.recipients.size,
+      views: a.views,
+      started: a.started,
+      completed: a.completed,
+      completionRate: a.shares ? Math.round((a.completed / a.shares) * 100) : 0,
+      avgProgress: a.progressCount ? Math.round(a.progressSum / a.progressCount) : 0,
+    }))
+    .sort((x, y) => y.shares - x.shares || y.views - x.views);
+}
+
 const styles = {
   wrap: { fontFamily: "system-ui, sans-serif", maxWidth: 1000, margin: "0 auto", padding: 20 },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
@@ -462,5 +715,15 @@ const styles = {
   message: { color: "#1f6feb" },
   bulkBar: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, marginBottom: 16, border: "1px solid #1f6feb", background: "#eef4ff", borderRadius: 8 },
   selectLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4, cursor: "pointer" },
+  videoWmLabel: { display: "block", fontSize: 12, color: "#57606a", margin: "6px 0" },
   emailFailedBadge: { fontSize: 12, color: "#d1242f" },
+  panelToggles: { display: "flex", gap: 10, margin: "8px 0 4px" },
+  panel: { border: "1px solid #d0d7de", borderRadius: 8, padding: 16, margin: "8px 0 20px", background: "#f6f8fa" },
+  settingLabel: { display: "block", fontSize: 14, color: "#24292f", marginBottom: 12 },
+  textarea: { display: "block", width: "100%", minHeight: 48, marginTop: 4, padding: 8, border: "1px solid #ccc", borderRadius: 6, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box" },
+  hint: { fontSize: 13, color: "#57606a" },
+  thLeft: { textAlign: "left" },
+  tdCenter: { textAlign: "center" },
+  wmBadge: { marginLeft: 6, fontSize: 12 },
+  wmBadgeOff: { marginLeft: 6, fontSize: 11, color: "#57606a", border: "1px solid #d0d7de", borderRadius: 4, padding: "0 4px" },
 };

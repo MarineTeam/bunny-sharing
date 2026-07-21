@@ -2,12 +2,41 @@
 
 Notable changes to this project, newest first. Grouped by date, since most
 days below were their own batch of work rather than a discrete release.
-Two version tags mark points release notes were cut from this history:
+Three version tags mark points release notes were cut from this history:
 
+- **v1.2.0** — the email watermark (layered global / per-share / per-video /
+  exemption control), per-video analytics, and resume playback.
 - **v1.1.0** — everything from 2026-07-18 through 2026-07-21 (bulk sharing,
   the email gate, bundle pages and consolidation, resend/extend/revoke and
   their bulk forms).
 - **v1.0.0** — everything at and before 2026-07-06.
+
+## v1.2.0 — 2026-07-21
+
+### Added
+- **Email watermark on the player.** The verified recipient's email can be
+  overlaid across the video (tiled, plus one drifting copy so a fixed crop
+  can't remove every instance) to deter casual re-sharing and attribute a
+  leaked screen-recording to one person. Layered control: a global default
+  (admin Settings panel), a per-share Always/Never override (single + bulk
+  Share forms), a per-video Always/Never override (select on each Videos row),
+  and an exemption list of emails/domains that are never watermarked (e.g.
+  internal admins/reviewers). Resolution order is exemption → per-share →
+  per-video → global default. Honest limit: it's a client-side overlay over the cross-origin
+  player, not burned into the video pixels — it raises effort and attributes
+  leaks, it is not DRM.
+- **Per-video analytics.** A collapsible admin panel rolls the existing
+  per-share tracking (views, plays, completion, furthest progress) up per
+  video — shares, unique recipients, total views, started, completed +
+  completion rate, and average progress. Reads only fields already stored; no
+  new tracking was added for it.
+- **Resume playback.** A returning viewer who left a video partway is offered
+  "Resume from m:ss" (or Start over). The player reports a throttled playback
+  position while watching; the watch page seeks to it on request. Skipped when
+  the saved point is basically the end.
+- **Global settings store.** First app-level settings, in a new
+  `bunnysettings:global` KV namespace, edited from a Settings panel on the
+  admin page and read/written via the admin-only `/api/settings` route.
 
 ## 2026-07-21
 
