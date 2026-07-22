@@ -24,13 +24,17 @@ Five version tags mark points release notes were cut from this history:
   advisory (GHSA-m99w-x7hq-7vfj), both flagged high-severity. Straight
   patch-version bump, no code changes needed — same remediation style as
   the 2026-07-10 CVE sweep. Particularly relevant here since `middleware.js`
-  now carries two geo-whitelist gates added this same day. A separate
-  advisory in `sharp` (a transitive, optional dependency of `next` used
-  only by `next/image`, which this app never imports — thumbnails are
-  plain `<img>` tags) remains open; `npm audit fix --force` would resolve
-  it only by downgrading `next` to 14.2.35, re-opening the 26 CVEs the
-  2026-07-10 upgrade to Next 16 fixed, for a code path this app doesn't
-  exercise. Left as accepted risk rather than forced.
+  now carries two geo-whitelist gates added this same day.
+- **Pinned `sharp` to `^0.35.3` via a new `overrides` entry**, patching
+  four libvips CVEs (CVE-2026-33327/33328/35590/35591), also flagged
+  high-severity. `sharp` is a transitive, optional dependency of `next`
+  used only by `next/image`, which this app never imports (thumbnails are
+  plain `<img>` tags) — so the vulnerable code path was never reachable,
+  but pinning is cheap and removes the alert outright rather than leaving
+  it open. Same technique as the existing `postcss` override from the
+  2026-07-10 CVE sweep: force the transitive dependency to a patched
+  version without touching `next` itself. `npm audit` now reports zero
+  vulnerabilities.
 
 ## v1.2.0 — 2026-07-21
 
