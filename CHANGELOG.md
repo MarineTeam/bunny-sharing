@@ -16,6 +16,22 @@ Five version tags mark points release notes were cut from this history:
   their bulk forms).
 - **v1.0.0** — everything at and before 2026-07-06.
 
+## 2026-07-22 (post-v1.4.0)
+
+### Fixed
+- **Upgraded `next` 16.2.10 → 16.2.11**, patching a middleware/proxy-bypass
+  advisory (GHSA-6gpp-xcg3-4w24) and a Server Actions denial-of-service
+  advisory (GHSA-m99w-x7hq-7vfj), both flagged high-severity. Straight
+  patch-version bump, no code changes needed — same remediation style as
+  the 2026-07-10 CVE sweep. Particularly relevant here since `middleware.js`
+  now carries two geo-whitelist gates added this same day. A separate
+  advisory in `sharp` (a transitive, optional dependency of `next` used
+  only by `next/image`, which this app never imports — thumbnails are
+  plain `<img>` tags) remains open; `npm audit fix --force` would resolve
+  it only by downgrading `next` to 14.2.35, re-opening the 26 CVEs the
+  2026-07-10 upgrade to Next 16 fixed, for a code path this app doesn't
+  exercise. Left as accepted risk rather than forced.
+
 ## v1.2.0 — 2026-07-21
 
 ### Added
