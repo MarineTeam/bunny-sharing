@@ -2,8 +2,10 @@
 
 Notable changes to this project, newest first. Grouped by date, since most
 days below were their own batch of work rather than a discrete release.
-Four version tags mark points release notes were cut from this history:
+Five version tags mark points release notes were cut from this history:
 
+- **v1.4.0** — env-var-based geo location whitelists for both recipient
+  pages and the admin surface.
 - **v1.3.0** — Delete permanently, Restore (un-revoke), persistent bundle
   links in the admin table, bulk revoke, extend a share's expiry, and one
   bundle per recipient across repeat shares.
@@ -41,7 +43,7 @@ Four version tags mark points release notes were cut from this history:
   `bunnysettings:global` KV namespace, edited from a Settings panel on the
   admin page and read/written via the admin-only `/api/settings` route.
 
-## 2026-07-22
+## v1.4.0 — 2026-07-22
 
 ### Added
 - **Geo location whitelists (recipient + admin), both env-var-based.** Two
