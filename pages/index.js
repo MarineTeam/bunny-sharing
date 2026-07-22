@@ -28,6 +28,11 @@ export default function Admin() {
   const [wmByVideo, setWmByVideo] = useState({});
   // Geo whitelist: comma/space-separated ISO country codes; empty = no restriction.
   const [geoCountries, setGeoCountries] = useState("");
+  // Admin-surface geo whitelist: the country list is read-only here (sourced
+  // from the ADMIN_GEO_WHITELIST env var, not editable in this UI); only the
+  // enforcement toggle is saved from here.
+  const [adminGeoEnabled, setAdminGeoEnabled] = useState(false);
+  const [adminGeoCountries, setAdminGeoCountries] = useState([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -69,6 +74,8 @@ export default function Admin() {
     setWmDomains((s.watermarkExemptDomains || []).join(", "));
     setWmByVideo(s.watermarkByVideo || {});
     setGeoCountries((s.geoWhitelistCountries || []).join(", "));
+    setAdminGeoEnabled(!!s.adminGeoWhitelistEnabled);
+    setAdminGeoCountries(s.adminGeoWhitelistCountries || []);
   }
 
   // Current per-video override as a select value: "on" / "off" / "default".
@@ -110,6 +117,7 @@ export default function Admin() {
         watermarkExemptEmails: wmEmails,
         watermarkExemptDomains: wmDomains,
         geoWhitelistCountries: geoCountries,
+        adminGeoWhitelistEnabled: adminGeoEnabled,
       }),
     });
     const data = await res.json();
@@ -431,6 +439,29 @@ export default function Admin() {
             inert on non-Vercel deployments or local dev (no header means
             access is allowed, never silently blocked).
           </p>
+
+          <h3>Admin access geo whitelist</h3>
+          <p style={styles.hint}>
+            Restricts this admin page and its API routes too (on top of your
+            login credentials). The country list itself is{" "}
+            <strong>not</strong> editable here — it's set via the{" "}
+            <code>ADMIN_GEO_WHITELIST</code> environment variable in your
+            hosting provider's dashboard, on purpose: if enabling this ever
+            locks you out, recovery can't depend on reaching this page.
+            {adminGeoCountries.length > 0 ? (
+              <> Currently configured: <strong>{adminGeoCountries.join(", ")}</strong>.</>
+            ) : (
+              <> Not currently configured — this toggle has no effect until <code>ADMIN_GEO_WHITELIST</code> is set.</>
+            )}
+          </p>
+          <label style={{ display: "block", marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={adminGeoEnabled}
+              onChange={(e) => setAdminGeoEnabled(e.target.checked)}
+            />{" "}
+            Enforce the admin geo whitelist
+          </label>
 
           <button onClick={saveSettings} disabled={savingSettings} style={styles.btn}>
             {savingSettings ? "Saving..." : "Save settings"}

@@ -425,6 +425,51 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   per-share or per-video override layer (unlike watermark) — this is a
   single global list for now, since there's no concrete request yet for
   finer-grained geo control.
+- **Follow-up 2026-07-22 (same day) — admin geo whitelist:** requirement
+  ("why not env var list, so admin can be protected too, and won't have
+  complete lockout") — extend geo restriction to the admin surface itself
+  (`/` and its `/api/*` routes, i.e. everything middleware.js already
+  guards with Basic Auth), while structurally avoiding the lockout trap a
+  KV-only design would create: if the country list lived in the same
+  Settings record the admin UI edits, and an admin enabled it against their
+  own country, they'd have no way back in — the fix would be behind the
+  very page it broke. Resolved by SPLITTING the two concerns: the country
+  list is `adminGeoWhitelist()` (`lib/geo.js`), read only from the
+  `ADMIN_GEO_WHITELIST` env var, never from KV/Settings — recovery is
+  always "edit the env var in your hosting dashboard and redeploy," a
+  surface this app's own gate can't touch. The ONLY thing that lives in
+  Settings is `adminGeoWhitelistEnabled` (`lib/settings.js`), a plain
+  runtime on/off toggle (default off) so an admin can flip enforcement
+  without a redeploy in the common case. `middleware.js` — the one file in
+  this repo requiring the most caution (non-negotiable 7) — was made
+  `async` to add ONE conditional `kvGet` (only when
+  `adminGeoWhitelist().length > 0`, i.e. zero cost for every deployment
+  that hasn't set the env var) strictly INSIDE the existing
+  `if (u === user && p === pass)` block: unauthenticated or wrong-credential
+  requests take the exact same path and get the exact same 401 as before —
+  the geo check never runs for them, so it can't become a way to probe
+  valid credentials or leak info pre-auth. `pages/api/settings.js`'s GET
+  now decorates the response with `adminGeoWhitelistCountries` (the env
+  var's parsed value) for display only — POST/`saveSettings` has no field
+  for it and cannot persist it. Admin UI: a new "Admin access geo
+  whitelist" block in Settings shows the configured countries (or "not
+  configured") read-only, with just the enforcement checkbox editable.
+- **Verified:** L0 only (`npm run build` clean, `Proxy (Middleware)` route
+  still registers with the now-async `middleware()`; invariant greps
+  re-run: matcher unchanged, `u === user && p === pass` compare unweakened,
+  the 401 + `WWW-Authenticate` challenge for bad/missing creds untouched,
+  and read-confirmed that the whole geo block sits inside the credential-
+  match branch). No live pass yet.
+- **Not yet exercised:** a live pass proving (a) with `ADMIN_GEO_WHITELIST`
+  set and the toggle OFF, admin access from any country is unaffected
+  (matches the "off by default, even if the env var is set" design); (b)
+  with the toggle ON and the tester's country excluded, valid credentials
+  from that country get a 403 rather than the 401 challenge (distinguishing
+  "wrong creds" from "right creds, wrong region" was a deliberate choice,
+  unverified live); (c) the fail-open path when `x-vercel-ip-country` is
+  absent (local dev) — confirmed only by code reading; (d) the actual
+  recovery story — unset `ADMIN_GEO_WHITELIST` and redeploy while
+  "locked out" — has never been rehearsed end-to-end, only reasoned about.
 
 ## 3. Positioning: standard vs actually nice
 

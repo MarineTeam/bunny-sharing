@@ -81,6 +81,19 @@ everyone out. It's a coarse IP-geolocation signal, the same honesty class as
 the watermark — a VPN defeats it, and it complements the email gate's
 identity check rather than replacing it.
 
+### Admin geo whitelist
+The admin page and its API routes can be geo-restricted too, on top of the
+`ADMIN_USER`/`ADMIN_PASS` credentials. Unlike the recipient-facing
+whitelist above, the country list here is set via the `ADMIN_GEO_WHITELIST`
+environment variable, not a Settings-panel field — deliberately, so it can
+never be edited from inside the admin UI it protects. The Settings panel
+only has an ON/OFF enforcement toggle (`adminGeoWhitelistEnabled`, off by
+default) and a read-only display of whatever the env var currently
+contains. If enabling this ever locks an admin out, recovery is unsetting
+`ADMIN_GEO_WHITELIST` in the hosting dashboard and redeploying — a path
+that doesn't depend on reaching the app at all. Same fail-open behavior as
+the recipient-facing whitelist when the geo header is absent.
+
 ## Watermarking
 
 Optionally overlay the recipient's verified email address across the video

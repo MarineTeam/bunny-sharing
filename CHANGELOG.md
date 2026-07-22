@@ -44,6 +44,12 @@ Four version tags mark points release notes were cut from this history:
 ## 2026-07-22
 
 ### Added
+- **Admin geo whitelist.** The admin page and its API routes can now also be
+  geo-restricted, on top of Basic Auth. The country list is set via a new
+  `ADMIN_GEO_WHITELIST` env var (not a Settings field) plus a new Settings
+  toggle to enforce it (off by default) — the list is deliberately kept out
+  of the in-app UI so a misconfigured lockout is always recoverable from
+  the hosting dashboard, never trapped behind the page it protects.
 - **Geo location whitelist.** An optional global list of allowed countries
   (admin Settings panel) applied to every `/watch` and `/bundle` page,
   checked before the email gate. Empty by default (no restriction).
