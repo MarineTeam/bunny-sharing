@@ -3,6 +3,7 @@ import { kvGet, kvSet } from "../../lib/kv";
 import { generateEmbedUrl } from "../../lib/bunny";
 import { signGrant, verifyGrant } from "../../lib/gate";
 import { getSettings, getVideoWatermark, resolveWatermark } from "../../lib/settings";
+import { isGeoAllowed, recipientGeoWhitelist } from "../../lib/geo";
 
 export default function WatchPage({
   status,
@@ -327,6 +328,11 @@ export async function getServerSideProps({ params, query, req, res }) {
     return { props: { status: "invalid", reason: "This link has expired." } };
   }
 
+  const settings = await getSettings();
+  if (settings.geoWhitelistEnabled && !isGeoAllowed(req, recipientGeoWhitelist())) {
+    return { props: { status: "invalid", reason: "This video isn't available in your region." } };
+  }
+
   // 1. Fresh magic-link click: exchange the short-lived ?grant= for a scoped,
   //    longer-lived cookie, then redirect to the clean URL so the one-time
   //    grant doesn't linger in the address bar or browser history.
@@ -391,7 +397,7 @@ export async function getServerSideProps({ params, query, req, res }) {
     // Watermark decision (global default + per-share override + exemptions).
     // Settings live in their own KV namespace; a deployment that never set
     // them reads defaults (watermark off), so this is inert until enabled.
-    const settings = await getSettings();
+    // (settings already fetched above for the geo check.)
     const watermarkOn = resolveWatermark({
       settings,
       recipientEmail: record.email,

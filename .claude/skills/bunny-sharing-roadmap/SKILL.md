@@ -386,6 +386,120 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   to a bundle simply disappears from that bundle's listing page rather than
   erroring it.
 
+### (l) Geo location whitelist — ADOPTED 2026-07-22
+- **Was:** access control had two dimensions (does the recipient control the
+  right inbox — the email gate; is the link still live — revoke/expiry) but
+  no way to restrict WHERE a video could be watched from at all, regardless
+  of who verifies.
+- **What shipped:** `lib/geo.js`'s `isGeoAllowed(req, whitelist)` compares
+  Vercel's `x-vercel-ip-country` header against an admin-configured list of
+  ISO 3166-1 alpha-2 codes. New `geoWhitelistCountries` field in
+  `lib/settings.js` (default `[]`, meaning unrestricted — same
+  additive/inert-until-set pattern as every other settings field), with a
+  `normalizeCountryList` sanitizer keeping only well-formed 2-letter codes,
+  uppercased. Enforced in `getServerSideProps` of BOTH
+  `pages/watch/[token].js` and `pages/bundle/[bundleId].js`, checked right
+  after the existing not-found/revoked/expired checks and BEFORE the
+  magic-link/cookie flow starts — a geo-blocked visitor never even sees the
+  email form. Deliberately fails OPEN when the header is missing (local dev,
+  non-Vercel hosts): the whitelist is inert rather than a silent lockout off
+  the target platform. Admin UI: a new "Geo location whitelist" block in the
+  existing Settings panel, plain comma/space-separated text input, same
+  pattern as the watermark exemption lists.
+- **Verified:** L0 only (`npm run build` clean, both routes still register;
+  invariant greps re-run: middleware matcher unchanged, `gate_<token>`
+  cookie name/path unchanged, `genericOk` uniform-response block in
+  `pages/api/watch/request-link.js` untouched — this feature intentionally
+  does NOT touch that endpoint at all, since anti-enumeration invariant 4 is
+  scoped to it specifically, not to the `/watch`/`/bundle` pages, which
+  already had distinguishable invalid/revoked/expired states before this).
+  No live pass yet.
+- **Not yet exercised:** a live pass proving (a) setting a whitelist that
+  excludes the tester's own country actually blocks `/watch` and `/bundle`
+  with the new reason text, while an included country still reaches the
+  email gate; (b) the fail-open path — confirmed only by code reading, not
+  by an actual non-Vercel-header request — behaves as "allowed" rather than
+  throwing or blocking; (c) a malformed value typed into the Settings field
+  (e.g. "usa", "12", empty) is dropped by `normalizeCountryList` rather than
+  stored and silently never matching. Also out of scope on purpose: no
+  per-share or per-video override layer (unlike watermark) — this is a
+  single global list for now, since there's no concrete request yet for
+  finer-grained geo control.
+- **Follow-up 2026-07-22 (same day) — admin geo whitelist:** requirement
+  ("why not env var list, so admin can be protected too, and won't have
+  complete lockout") — extend geo restriction to the admin surface itself
+  (`/` and its `/api/*` routes, i.e. everything middleware.js already
+  guards with Basic Auth), while structurally avoiding the lockout trap a
+  KV-only design would create: if the country list lived in the same
+  Settings record the admin UI edits, and an admin enabled it against their
+  own country, they'd have no way back in — the fix would be behind the
+  very page it broke. Resolved by SPLITTING the two concerns: the country
+  list is `adminGeoWhitelist()` (`lib/geo.js`), read only from the
+  `ADMIN_GEO_WHITELIST` env var, never from KV/Settings — recovery is
+  always "edit the env var in your hosting dashboard and redeploy," a
+  surface this app's own gate can't touch. The ONLY thing that lives in
+  Settings is `adminGeoWhitelistEnabled` (`lib/settings.js`), a plain
+  runtime on/off toggle (default off) so an admin can flip enforcement
+  without a redeploy in the common case. `middleware.js` — the one file in
+  this repo requiring the most caution (non-negotiable 7) — was made
+  `async` to add ONE conditional `kvGet` (only when
+  `adminGeoWhitelist().length > 0`, i.e. zero cost for every deployment
+  that hasn't set the env var) strictly INSIDE the existing
+  `if (u === user && p === pass)` block: unauthenticated or wrong-credential
+  requests take the exact same path and get the exact same 401 as before —
+  the geo check never runs for them, so it can't become a way to probe
+  valid credentials or leak info pre-auth. `pages/api/settings.js`'s GET
+  now decorates the response with `adminGeoWhitelistCountries` (the env
+  var's parsed value) for display only — POST/`saveSettings` has no field
+  for it and cannot persist it. Admin UI: a new "Admin access geo
+  whitelist" block in Settings shows the configured countries (or "not
+  configured") read-only, with just the enforcement checkbox editable.
+- **Verified:** L0 only (`npm run build` clean, `Proxy (Middleware)` route
+  still registers with the now-async `middleware()`; invariant greps
+  re-run: matcher unchanged, `u === user && p === pass` compare unweakened,
+  the 401 + `WWW-Authenticate` challenge for bad/missing creds untouched,
+  and read-confirmed that the whole geo block sits inside the credential-
+  match branch). No live pass yet.
+- **Not yet exercised:** a live pass proving (a) with `ADMIN_GEO_WHITELIST`
+  set and the toggle OFF, admin access from any country is unaffected
+  (matches the "off by default, even if the env var is set" design); (b)
+  with the toggle ON and the tester's country excluded, valid credentials
+  from that country get a 403 rather than the 401 challenge (distinguishing
+  "wrong creds" from "right creds, wrong region" was a deliberate choice,
+  unverified live); (c) the fail-open path when `x-vercel-ip-country` is
+  absent (local dev) — confirmed only by code reading; (d) the actual
+  recovery story — unset `ADMIN_GEO_WHITELIST` and redeploy while
+  "locked out" — has never been rehearsed end-to-end, only reasoned about.
+- **Follow-up 2026-07-22 (same day) — recipient whitelist moved to env var
+  too:** requirement ("actually wanted everything including the original
+  geo whitelist to be in env var not just admin whitelist") — the
+  recipient-facing list (originally the `geoWhitelistCountries` KV/Settings
+  field from earlier the same day) was inconsistent with the admin design
+  above for no good reason; unified onto the identical pattern. New
+  `GEO_WHITELIST` env var + `recipientGeoWhitelist()` (`lib/geo.js`,
+  refactored alongside `adminGeoWhitelist()` to share a `parseWhitelist`
+  helper). `lib/settings.js`: `geoWhitelistCountries` (an editable KV array)
+  was REPLACED by `geoWhitelistEnabled` (a plain runtime toggle, same shape
+  as `adminGeoWhitelistEnabled`); `normalizeCountryList` was deleted as
+  dead code once nothing validated a stored list anymore. Because this
+  field existed for less than a day and was never certified or (as far as
+  this repo's history shows) deployed, replacing rather than deprecating it
+  was judged safe — flagged here explicitly in case that judgment call
+  needs revisiting. `pages/watch/[token].js` and `pages/bundle/[bundleId].js`
+  both changed their check from `isGeoAllowed(req, settings.geoWhitelistCountries)`
+  to `settings.geoWhitelistEnabled && isGeoAllowed(req, recipientGeoWhitelist())`.
+  `pages/api/settings.js` GET now decorates BOTH `geoWhitelistCountries` and
+  `adminGeoWhitelistCountries` read-only from their env vars; neither is
+  ever accepted by POST. Admin UI: the recipient-facing Settings block lost
+  its free-text textarea and gained the same read-only-display-plus-toggle
+  shape as the admin block.
+- **Verified:** L0 only (`npm run build` clean; invariant greps re-run:
+  matcher/credential-compare/cookie unchanged; confirmed via grep that no
+  code path still reads/writes a persisted `geoWhitelistCountries` KV
+  field). No live pass yet — same gaps as the admin entry above, now
+  doubled (recipient side was never live-verified even under the original
+  KV design before this follow-up replaced it).
+
 ## 3. Positioning: standard vs actually nice
 
 Standard practice, competently applied (claim nothing): magic links, HMAC-SHA256

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
+import { kvGet } from "./lib/kv";
+import { adminGeoWhitelist, isGeoAllowedEdge } from "./lib/geo";
 
 // Protects the admin page and its API routes with HTTP Basic Auth.
 // The /watch/[token] and /bundle/[bundleId] pages are NOT covered, so
 // recipients can open their links freely — and neither are /api/watch/* or
 // /api/bundle/*, the public endpoints recipients call to request their
 // email-gated sign-in links.
-export function middleware(req) {
+export async function middleware(req) {
   const auth = req.headers.get("authorization");
   const user = process.env.ADMIN_USER;
   const pass = process.env.ADMIN_PASS;
@@ -17,6 +19,23 @@ export function middleware(req) {
     const u = decoded.slice(0, idx);
     const p = decoded.slice(idx + 1);
     if (u === user && p === pass) {
+      // Additional, OPT-IN geo restriction on top of valid credentials.
+      // The country list comes only from ADMIN_GEO_WHITELIST (an env var,
+      // never the admin-editable KV settings — see lib/geo.js for why);
+      // when it's unset this whole block is a no-op with zero extra KV
+      // calls, so a deployment that never sets it behaves exactly as
+      // before. When it IS set, enforcement is still gated by a runtime
+      // toggle (settings.adminGeoWhitelistEnabled) so an admin can flip it
+      // off in the Settings panel without a redeploy — but the ultimate
+      // recovery path if it ever locks someone out is unsetting the env
+      // var in the hosting dashboard, a surface this check can't reach.
+      const whitelist = adminGeoWhitelist();
+      if (whitelist.length > 0) {
+        const settings = await kvGet("bunnysettings:global");
+        if (settings && settings.adminGeoWhitelistEnabled && !isGeoAllowedEdge(req, whitelist)) {
+          return new NextResponse("Admin access is restricted from your region", { status: 403 });
+        }
+      }
       return NextResponse.next();
     }
   }
