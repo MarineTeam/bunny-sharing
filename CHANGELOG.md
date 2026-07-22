@@ -2,8 +2,11 @@
 
 Notable changes to this project, newest first. Grouped by date, since most
 days below were their own batch of work rather than a discrete release.
-Three version tags mark points release notes were cut from this history:
+Four version tags mark points release notes were cut from this history:
 
+- **v1.3.0** — Delete permanently, Restore (un-revoke), persistent bundle
+  links in the admin table, bulk revoke, extend a share's expiry, and one
+  bundle per recipient across repeat shares.
 - **v1.2.0** — the email watermark (layered global / per-share / per-video /
   exemption control), per-video analytics, and resume playback.
 - **v1.1.0** — everything from 2026-07-18 through 2026-07-21 (bulk sharing,
@@ -38,7 +41,7 @@ Three version tags mark points release notes were cut from this history:
   `bunnysettings:global` KV namespace, edited from a Settings panel on the
   admin page and read/written via the admin-only `/api/settings` route.
 
-## 2026-07-21
+## v1.3.0 — 2026-07-22
 
 ### Added
 - **Delete permanently.** A revoked share can now be deleted outright from
