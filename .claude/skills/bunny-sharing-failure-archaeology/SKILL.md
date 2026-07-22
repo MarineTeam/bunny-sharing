@@ -382,6 +382,81 @@ each is owned by a sibling skill.
 
 ---
 
+## Episode 11 — Host header poisoning, take two: the 2026-07-10 fix was incomplete
+
+**Symptom/Trigger.** CodeQL flagged `lib/mailer.js:53` "host header poisoning
+in email generation" as CRITICAL (alerts #5 and #6, duplicated — two taint
+paths converging on the same `transporter.sendMail` sink), plus a separate
+High "polynomial regular expression" alert (#7) on `lib/gate.js:25`, both
+opened against `main` two days after the geo-whitelist work landed.
+
+**What was found on inspection (not assumed from the alert labels).**
+- The ReDoS alert was a **false positive**: `b64url()`'s regex chain
+  (`\+`, `\/`, `=+$`) benchmarked LINEAR from 1K to 1M-char inputs (~1000x
+  input → ~80x time, no blowup) — none of those patterns have the
+  nested/ambiguous-quantifier shape that causes catastrophic backtracking.
+  Verified with a direct Node benchmark, not just read by eye. No code
+  change; the alert should be dismissed with that reasoning.
+- The host-header-poisoning alert was **real, and Episode 4's `29fb9be` fix
+  never actually closed it**. `29fb9be` added `escapeHtml`/`isValidUrl` to
+  `lib/mailer.js`, but `isValidUrl` only checks a link parses as
+  `http:`/`https:` — a link to `https://evil.com/watch/<token>` passes that
+  check fine. Meanwhile `baseUrl()` (`lib/shares.js`) still fell back to
+  `SITE_URL || \`https://${req.headers.host}\`` — a client-suppliable Host
+  header, trusted whenever `SITE_URL` was unset. Net effect: a forged
+  request could make the app email a real recipient a legitimate-looking
+  share/magic-link notification whose link pointed at an attacker's domain.
+  The `http:`→`https:` fix in `30ecd7f` (Episode 2) only forced the scheme;
+  it never validated the host was actually this app.
+
+**What was done** (2026-07-22): `baseUrl(req)` now REQUIRES `SITE_URL` and
+throws if it's unset — the Host-header fallback was removed entirely, same
+fail-loud pattern as `GATE_SECRET` (`lib/gate.js`). This is a breaking
+config change: any deployment that relied on the auto-detected fallback
+(no `SITE_URL` set) now needs to set it. Three options were weighed with
+the maintainer before touching it — fail-loud, an opt-in `ALLOWED_HOSTS`
+allowlist (non-breaking but only fixes anything for deployments that set
+it), or documenting it as accepted risk — maintainer chose fail-loud for a
+complete fix.
+
+**A second-order fix this forced.** `baseUrl(req)` is called from the two
+PUBLIC, anti-enumeration-sensitive endpoints too
+(`pages/api/watch/request-link.js`, `pages/api/bundle/request-link.js`),
+each guarded by invariant 4 (`genericOk()` must be byte-identical for every
+outcome). Both endpoints' `catch` blocks previously returned
+`res.status(500).json({ error: err.message })` on ANY thrown error — and
+critically, that catch only fires on the code path AFTER the email already
+matched (every earlier miss returns `genericOk()` directly, never reaching
+`baseUrl()` or the `catch`). So making `SITE_URL` fail loud would have
+turned a misconfiguration into a live oracle: a 500 response distinguishable
+from every `genericOk()` 200 would leak exactly "this token+email pair
+matched" to anyone probing. This exact same shape of leak already existed
+for a missing `GATE_SECRET` (also thrown, also only on the match path) —
+this fix closed both at once by making the `catch` blocks in both files
+return `genericOk()` unconditionally (logging server-side via
+`console.error`, never returning `err.message` to the caller).
+
+**Evidence.** `lib/shares.js` (`baseUrl`), `pages/api/watch/request-link.js`
+and `pages/api/bundle/request-link.js` (catch blocks), the Node benchmark
+run inline in the session that made this fix (not committed — see the
+`lib/gate.js:25` grep in bunny-sharing-change-control's invariant-grep list
+if you want to re-verify it's still linear after any future edit to
+`b64url`).
+
+**Status: SETTLED** (fail-loud `SITE_URL`; ReDoS alert is a false positive,
+dismissible). Two lessons:
+1. A partial fix to a CodeQL finding (Episode 4 addressed XSS but not the
+   host-trust gap) can leave the alert's own category — "host header
+   poisoning" — still genuinely open under a different mechanism. Read what
+   the mitigation actually covers before treating an alert as resolved.
+2. Any new fail-loud env var check reachable from
+   `request-link.js`/`bundle/request-link.js` MUST be re-verified against
+   invariant 4 (uniform response) before shipping — a thrown error on the
+   success-only path is a structurally different leak than one on a common
+   path, and easy to miss.
+
+---
+
 ## When NOT to use this skill
 
 - **Debugging a live symptom right now** (403s, emails not arriving, gate

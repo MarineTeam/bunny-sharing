@@ -51,7 +51,7 @@ See [FEATURES.md](./FEATURES.md) for the full feature list and [CHANGELOG.md](./
 | `BUNNY_TOKEN_KEY` | Bunny token authentication key, used to sign embed URLs |
 | `BUNNY_PULL_ZONE` | Bunny Stream pull zone hostname |
 | `BUNNY_CDN_TOKEN_KEY` | Pull zone's Token Authentication key. Only needed if Token Authentication is enabled on the pull zone (thumbnails will 403 without it). Found under Library > API > "CDN zone management" > Manage > Security > Token Authentication — **not** the same key as `BUNNY_TOKEN_KEY`. |
-| `SITE_URL` | Public base URL used when building share links (falls back to the request host) |
+| `SITE_URL` | **Required.** Public base URL used when building every emailed link (e.g. `https://your-app.example.com`, or `http://localhost:3000` in dev). The app fails loudly if it's unset — it deliberately never falls back to the request's Host header, which a client can spoof (host header poisoning). |
 | `ADMIN_USER` / `ADMIN_PASS` | Credentials for Basic Auth on `/` and its API routes |
 | `GEO_WHITELIST` | Optional comma/space-separated ISO country codes (e.g. `US, CA`) allowed to reach `/watch` and `/bundle` pages. Also requires enabling it in the Settings panel (off by default). Deliberately an env var, not a Settings field, so the list can't be mistyped and saved instantly. |
 | `ADMIN_GEO_WHITELIST` | Same idea, for the admin page/API, on top of the credentials above. Also requires enabling it in the Settings panel (off by default). An env var for the same reason, plus: it must stay editable outside the app so a lockout is always fixable from your hosting dashboard, not locked behind the very page it protects. |

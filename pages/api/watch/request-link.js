@@ -71,6 +71,13 @@ export default async function handler(req, res) {
 
     return genericOk();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Never let an unexpected error (e.g. a misconfigured GATE_SECRET or
+    // SITE_URL) become a response distinguishable from genericOk() — that
+    // error only fires on the code path where the email actually matched,
+    // so a 500-vs-200 split here would let an attacker fingerprint valid
+    // token+email pairs by status code alone. Log server-side; tell the
+    // caller nothing more than every other outcome does.
+    console.error("watch/request-link error:", err);
+    return genericOk();
   }
 }

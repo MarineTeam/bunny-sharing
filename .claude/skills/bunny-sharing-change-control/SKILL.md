@@ -69,26 +69,43 @@ to require it, stop and escalate to the maintainer.
 2. **All user-controlled strings in email HTML pass through `escapeHtml`; all
    links pass `isValidUrl`** (lib/mailer.js:4-22; used by all three senders).
    *Why:* video titles and links land in HTML email bodies; unescaped input is
-   stored XSS in the recipient's mail client, and unvalidated links let a forged
-   Host header poison the emailed URL.
-   *Incident:* `29fb9be` (2026-07-10) fixed CodeQL alerts for exactly this — XSS
-   and host-header poisoning in email generation.
+   stored XSS in the recipient's mail client. Note `isValidUrl` only checks the
+   link parses as `http:`/`https:` — it does NOT verify the host is actually
+   this app; that's invariant 3's job, not this one's (a link to a well-formed
+   `https://evil.com/...` URL passes `isValidUrl` fine).
+   *Incident:* `29fb9be` (2026-07-10) fixed CodeQL alerts for XSS in email
+   generation.
 
-3. **`baseUrl()` fallback stays `https://`** (lib/shares.js:6:
-   `SITE_URL || \`https://${req.headers.host}\``).
-   *Why:* same host-header-poisoning class as #2 — an attacker-supplied Host must
-   never yield an http link that can be intercepted.
+3. **`baseUrl()` REQUIRES `SITE_URL` and fails loudly if it's unset — there is
+   no Host-header fallback** (lib/shares.js).
+   *Why:* the request `Host` header is client-suppliable. The OLD behavior —
+   `SITE_URL || \`https://${req.headers.host}\`` — let a forged Host header
+   make the app email real recipients a legitimate-looking notification whose
+   link pointed at an attacker's domain. Forcing `https://` (the pre-2026-07-22
+   version of this rule) stopped a downgrade to `http:` but never addressed
+   the host itself being attacker-controlled — `isValidUrl` (invariant 2) only
+   checks protocol, not origin, so it didn't cover this either.
    *Incident:* the `http:` → `https:` fallback flip landed in `30ecd7f`
-   (verify: `git show 30ecd7f -- pages/api/share.js | grep https`); the broader
-   host-header issue was flagged by CodeQL and addressed in `29fb9be`.
+   (2026-07-03); CodeQL correctly flagged the remaining host-trust gap as
+   "host header poisoning in email generation" (alerts #5/#6, critical),
+   fixed 2026-07-22 by removing the fallback entirely (fail-loud, same
+   pattern as `GATE_SECRET`). See failure-archaeology for the full incident
+   — including why the fix also had to touch the public
+   `/api/watch/request-link` and `/api/bundle/request-link` catch blocks
+   (invariant 4), since a thrown `SITE_URL`-missing error there would
+   otherwise produce a response distinguishable from `genericOk()`.
 
-4. **`/api/watch/request-link` returns the IDENTICAL generic 200 for invalid
-   link, revoked/expired share, mismatched email, throttled, AND success**
-   (`genericOk()` in pages/api/watch/request-link.js:20-24, returned at four
-   sites). *Why:* anti-enumeration — the public endpoint must not let anyone
-   probe which email a link belongs to, or whether a token is live. Any new
-   branch in that handler must return `genericOk()`, not a distinguishable
-   response, status code, or timing-obvious shortcut.
+4. **`/api/watch/request-link` and `/api/bundle/request-link` return the
+   IDENTICAL generic 200 for invalid link/bundle, revoked/expired,
+   mismatched email, throttled, success, AND any unexpected runtime error**
+   (`genericOk()` in each file, returned at five sites — the catch block
+   included as of 2026-07-22). *Why:* anti-enumeration — the public endpoint
+   must not let anyone probe which email a link belongs to, or whether a
+   token is live, INCLUDING via an error a misconfiguration might trigger
+   (e.g. a missing `SITE_URL`/`GATE_SECRET` only surfacing when the email
+   actually matched would itself be an oracle). Any new branch in either
+   handler — success, failure, or error — must return `genericOk()`, not a
+   distinguishable response, status code, or timing-obvious shortcut.
 
 5. **GATE_SECRET has no default; the gate fails loud** (lib/gate.js:14-22,
    `secret()` throws when unset). *Why:* a silent fallback secret means a
@@ -149,9 +166,10 @@ Do not hand-roll a variant here; keep one canonical script.
 expectation; a mismatch means an invariant moved and the diff needs re-review.
 
 ```bash
-# Matcher still has the negative lookahead keeping /api/watch/* public:
+# Matcher still has the negative lookahead keeping /api/watch/* and
+# /api/bundle/* public:
 grep -n "watch/" middleware.js
-# EXPECT a line: matcher: ["/", "/api/((?!watch/).*)"]
+# EXPECT a line: matcher: ["/", "/api/((?!watch/|bundle/).*)"]
 
 # KV prefix untouched — every read/write still uses bunnyshare:
 grep -rn "bunnyshare:" lib pages
@@ -165,14 +183,18 @@ grep -rn "bunnyshare:" lib pages
 grep -n "gate_" "pages/watch/[token].js"
 # EXPECT: return `gate_${token}`;  (and Set-Cookie uses Path=/watch/${token})
 
-# https fallback intact:
-grep -n "https://" lib/shares.js
-# EXPECT: process.env.SITE_URL || `https://${req.headers.host}`
+# SITE_URL fail-loud, no Host-header fallback (2026-07-22 fix):
+grep -n "SITE_URL is not set\|req.headers.host" lib/shares.js
+# EXPECT: the throw message present; NO match for req.headers.host at all
+
+# Public gate endpoints never let an error become a distinguishable
+# response (5 genericOk() call sites each, including the catch block):
+grep -cn "genericOk()" pages/api/watch/request-link.js pages/api/bundle/request-link.js
 
 # Uniform request-link responses — every outcome branch returns genericOk:
 grep -n "genericOk" pages/api/watch/request-link.js
-# EXPECT: 1 definition + 4 return sites (missing/revoked/expired, email
-# mismatch, throttled, success)
+# EXPECT: 1 definition + 5 return sites (missing/revoked/expired, email
+# mismatch, throttled, success, catch-block error)
 
 # Fail-loud secret and constant-time compare still present:
 grep -n "GATE_SECRET\|timingSafeEqual" lib/gate.js
@@ -260,7 +282,7 @@ Facts verified against the working tree on 2026-07-18 (branch
 - Prefix + record shape: `grep -rn "bunnyshare:" lib pages` and `sed -n '12,30p' lib/shares.js`
 - Cookie name/path: `grep -n "gate_\|Path=/watch" "pages/watch/[token].js"`
 - Fail-loud secret / timingSafeEqual: `grep -n "GATE_SECRET\|timingSafeEqual" lib/gate.js`
-- Uniform responses: `grep -n "genericOk" pages/api/watch/request-link.js` (1 def + 4 returns)
+- Uniform responses: `grep -n "genericOk" pages/api/watch/request-link.js` (1 def + 5 returns)
 - Revoke-is-flag: `grep -n "revoked = true" pages/api/revoke.js`
 - Build-without-secret claim: `env -u GATE_SECRET npm run build` (rerun if Next.js is upgraded; deprecation warning text may change)
 - Incidents: `git show --stat 30ecd7f` and `git show 29fb9be -- lib/mailer.js`

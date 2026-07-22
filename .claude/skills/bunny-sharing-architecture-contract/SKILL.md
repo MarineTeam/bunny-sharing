@@ -362,13 +362,13 @@ from the repo root to confirm it still holds.
 |---|-----------|-----------------------|
 | 1 | **Never break live links** (prime directive): existing tokens, `bunnyshare:*` key prefix, record field meanings, `/watch/<token>` URL shape, and `gate_<token>` cookie name/path keep working across all changes. (Cautionary tale: `30ecd7f` silently migrated `share:` → `bunnyshare:` and orphaned old records.) | `grep -rn "bunnyshare:" lib pages` — every KV access uses the prefix; `grep -rn "gate_" pages` — cookie name unchanged |
 | 2 | All user-controlled strings in email HTML pass `escapeHtml`; all links pass `isValidUrl` (`lib/mailer.js:4-22`) | `grep -n "escapeHtml\|isValidUrl" lib/mailer.js` — present in every `send*` function |
-| 3 | `baseUrl` fallback is https, never the raw request scheme (`lib/shares.js:6`) | `grep -n "https://" lib/shares.js` |
-| 4 | `/api/watch/request-link` returns an IDENTICAL 200 body for invalid link, mismatched email, throttled, and success (anti-enumeration) | `grep -cn "genericOk()" pages/api/watch/request-link.js` — expect 4 call sites |
+| 3 | `baseUrl(req)` REQUIRES `SITE_URL` and fails loudly if unset (`lib/shares.js`) — never falls back to the request's Host header, which a client can spoof. (2026-07-22 fix for a CodeQL host-header-poisoning finding; see failure-archaeology for the incident.) | `grep -n "SITE_URL is not set" lib/shares.js` — throw present; `grep -n "req.headers.host" lib/shares.js` — expect NO match |
+| 4 | `/api/watch/request-link` AND `/api/bundle/request-link` return an IDENTICAL 200 body for invalid link/bundle, mismatched email, throttled, success, AND any unexpected runtime error (anti-enumeration) | `grep -cn "genericOk()" pages/api/watch/request-link.js pages/api/bundle/request-link.js` — expect 5 call sites each (the catch block also returns `genericOk()`, not a distinguishable 500, as of the 2026-07-22 fix) |
 | 5 | `GATE_SECRET` has no default; the gate throws if unset (`lib/gate.js:14-22`) | `grep -n "throw" lib/gate.js` — inside `secret()` |
 | 6 | Grant verification uses `crypto.timingSafeEqual`; grants are token-bound and expiring (`lib/gate.js:55,60-61`) | `grep -n "timingSafeEqual\|payload.t !== token\|payload.x" lib/gate.js` |
-| 7 | Middleware matcher keeps `/api/watch/*` public and everything else on the admin surface behind Basic Auth; `/watch/*` stays out of the matcher | `grep -n "matcher" middleware.js` — exactly `["/", "/api/((?!watch/).*)"]` |
+| 7 | Middleware matcher keeps `/api/watch/*` and `/api/bundle/*` public and everything else on the admin surface behind Basic Auth (plus an opt-in admin geo whitelist); `/watch/*` and `/bundle/*` stay out of the matcher | `grep -n "matcher" middleware.js` — exactly `["/", "/api/((?!watch/\|bundle/).*)"]` |
 | 8 | Every share has its own token; bulk M recipients × N videos → M×N records, each independently revocable | `grep -n "createShareRecord" pages/api/share-bulk.js` — inside the per-recipient, per-video loops |
-| 9 | Revoke flips `revoked: true`; only cleanup deletes, and only revoked-or-expired records | `grep -n "kvDel" pages/api/*.js` — only `cleanup.js` matches |
+| 9 | Revoke flips `revoked: true`, never deletes; `pages/api/revoke-permanent.js` is the one EXPLICIT exception (requires the record already be revoked) plus `cleanup.js` (revoked-or-expired sweep) | `grep -n "kvDel" pages/api/*.js` — only `cleanup.js` and `revoke-permanent.js` match |
 
 ## 4. Known weak points — honest register
 
@@ -559,8 +559,10 @@ distinct Path scopes, so there is no name or scope collision even though a
 | Bundle magic link | `<baseUrl>/bundle/<bundleId>?grant=<urlencoded grant>` | `pages/api/bundle/request-link.js` |
 | Embed | `https://iframe.mediadelivery.net/embed/<BUNNY_LIBRARY_ID>/<videoId>?token=<sha256 hex>&expires=<unix seconds>` | `lib/bunny.js:64` |
 
-`baseUrl(req)` = `SITE_URL` if set, else `https://<host header>` — the
-https fallback is deliberate (host-header poisoning fix, invariant 3).
+`baseUrl(req)` = `SITE_URL`, always — it throws if unset. There is no Host
+header fallback (removed 2026-07-22; see invariant 3 and failure-archaeology
+for why the old fallback was itself the host-header-poisoning bug, not the
+fix for one).
 
 ## When NOT to use this skill
 

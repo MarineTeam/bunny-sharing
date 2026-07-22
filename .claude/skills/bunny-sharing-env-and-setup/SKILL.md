@@ -39,10 +39,10 @@ below were derived by reading each call path (file:line refs as of 2026-07-18).
 | `BUNNY_TOKEN_KEY` | `lib/bunny.js:57` (`generateEmbedUrl`) | Yes (if library Embed View Token Auth is on) | none — missing key is concatenated as the string `"undefined"` into the hash | No throw, no 500. The embed token is simply wrong; the Bunny iframe rejects it and the recipient sees the player's auth error. If the library's embed token auth is OFF, the bogus `?token=` is ignored and playback still works — a trap that hides misconfiguration until you enable token auth. | Required in prod (token auth should be on) |
 | `BUNNY_PULL_ZONE` | `lib/bunny.js:20` (`listVideos`) | No | `thumbnail: null` when unset | Graceful: admin grid renders without thumbnail images (`pages/index.js:160` guards with `v.thumbnail &&`). Everything else works. | Optional |
 | `BUNNY_CDN_TOKEN_KEY` | `lib/bunny.js:41` (`signCdnUrl`) | Only if pull-zone Token Authentication is ON | unset → `signCdnUrl` returns the URL unsigned (`lib/bunny.js:42`) | With pull-zone token auth ON and this unset: thumbnails 403 in the admin grid, but **embeds still play fine** (embeds use `BUNNY_TOKEN_KEY`, a different key). With token auth OFF: harmless either way. This exact confusion caused incident 65dc992 — see bunny-stream-reference. | Optional (conditional) |
-| `SITE_URL` | `lib/shares.js:6` (`baseUrl`), `pages/watch/[token].js:148` (cookie `Secure` heuristic) | No, but strongly recommended | falls back to `https://<request Host header>` (https deliberately forced — host-header-poisoning fix, incident 29fb9be) | Unset in local dev: emailed links become `https://localhost:3000` — https where dev serves http, so links from a dev box don't open. Unset in prod behind a proxy: links use whatever Host the proxy passes. Also feeds the cookie `Secure` flag when `x-forwarded-proto` is absent. Set it. | Recommended everywhere; effectively required for correct emailed links in dev |
+| `SITE_URL` | `lib/shares.js` (`baseUrl`), `pages/watch/[token].js:148` (cookie `Secure` heuristic) | **Yes, as of 2026-07-22** | none — `baseUrl()` throws ("SITE_URL is not set…") if unset; there is NO Host-header fallback anymore (that fallback was itself the host-header-poisoning bug CodeQL flagged — see failure-archaeology Episode 11, not a fix for one) | Unset: every `baseUrl()` call throws. On the admin-only endpoints (`/api/share`, `/api/share-bulk`, `/api/share/resend[-bulk]`) this surfaces as a plain 500 to the (already-authenticated) admin. On the two PUBLIC gate endpoints (`/api/watch/request-link`, `/api/bundle/request-link`) the same throw is caught and returns the ordinary `genericOk()` 200 — indistinguishable from every other outcome, so a missing `SITE_URL` never becomes an anti-enumeration oracle, it just silently fails to deliver the magic-link email. Also feeds the cookie `Secure` flag when `x-forwarded-proto` is absent. Set it to `http://localhost:3000` in dev, your public https URL in prod. | Required everywhere |
 | `ADMIN_USER` | `middleware.js:9` | Yes | none | Missing (either var): the string comparison at `middleware.js:18` can never succeed against `undefined` → **permanent 401 on `/` and all admin API routes** — total admin lockout. `/watch/*` and `/api/watch/*` stay reachable (outside the matcher). | Required everywhere |
 | `ADMIN_PASS` | `middleware.js:10` | Yes | none | Same as `ADMIN_USER`. | Required everywhere |
-| `GATE_SECRET` | `lib/gate.js:15` (`secret()`, called by `signGrant` and `verifyGrant`) | Yes at runtime | none — `secret()` **throws** ("GATE_SECRET is not set…"); deliberately no insecure default | Build unaffected: `next build` succeeds without it (read is call-time, `/watch` is SSR). Runtime, precisely: `/watch/<token>` does **not** 500 — `verifyGrant` wraps everything in try/catch (`lib/gate.js:47-65`), so the throw is swallowed and the page falls back to the email form. The visible failure is `POST /api/watch/request-link` **with a matching email** → 500 `{"error":"GATE_SECRET is not set…"}` via `signGrant` (`request-link.js:50` → handler catch). Non-matching email / invalid token still return the generic 200. Net effect: recipients can never get in; the loud error only surfaces on a matching request-link call. | Required everywhere |
+| `GATE_SECRET` | `lib/gate.js:15` (`secret()`, called by `signGrant` and `verifyGrant`) | Yes at runtime | none — `secret()` **throws** ("GATE_SECRET is not set…"); deliberately no insecure default | Build unaffected: `next build` succeeds without it (read is call-time, `/watch` is SSR). Runtime, precisely: `/watch/<token>` does **not** 500 — `verifyGrant` wraps everything in try/catch (`lib/gate.js:47-65`), so the throw is swallowed and the page falls back to the email form. `POST /api/watch/request-link`/`request-link` for `/bundle` **with a matching email** hits the same throw via `signGrant`, but as of 2026-07-22 that's caught and returns the ordinary `genericOk()` 200, same as every other outcome — it no longer surfaces as a distinguishable 500 (that used to be a live anti-enumeration leak: a matching email was the ONLY path that threw, so a 500-vs-200 split would fingerprint valid token+email pairs; see failure-archaeology Episode 11). Net effect of either secret being unset: recipients can never get in, silently — check server logs (`console.error`), not the HTTP response, to diagnose this. | Required everywhere |
 | `RESEND_API_KEY` | `lib/mailer.js:35-36` (`deliver`) | One email path required | unset → SMTP fallback path | Presence selects the Resend HTTP API path (SMTP vars then ignored). Wrong key: Resend returns an error → `deliver` throws → 500 from `/api/share`, `/api/share-bulk`, `/api/watch/request-link`. **Trap:** share/share-bulk store the record BEFORE emailing, so a failed send leaves a live record with no delivered email. | Either this or SMTP set |
 | `RESEND_FROM` | `lib/mailer.js:25` (`fromAddress`) | With Resend path: effectively yes | falls back to `SMTP_FROM`, then `SMTP_USER` | If the whole chain is empty, `from` is `undefined` → provider rejects → send throws → 500 (record already stored, as above). Resend also rejects senders not verified on your Resend domain. | Required when using Resend |
 | `SMTP_HOST` | `lib/mailer.js:45` (`deliver`) | Required on SMTP path | none | Missing/wrong (with `RESEND_API_KEY` unset): nodemailer connection error → send throws → 500 on the three emailing routes; record already stored. | Required iff SMTP path |
@@ -67,9 +67,10 @@ grep in Provenance). `NODE_ENV` is handled by Next.js itself.
    unset, otherwise the API path wins.
 2. **From-address chain** (`lib/mailer.js:24-26`):
    `RESEND_FROM` → `SMTP_FROM` → `SMTP_USER` → `undefined` (send fails).
-3. **Link base URL** (`lib/shares.js:5-7`): `SITE_URL` → `https://<Host header>`.
-   The fallback forces `https` on purpose (host-header-poisoning remediation);
-   do not "fix" it to mirror the request protocol.
+3. **Link base URL** (`lib/shares.js`): `SITE_URL`, always — `baseUrl()`
+   throws if it's unset. There is no Host-header fallback (removed
+   2026-07-22; the fallback WAS the host-header-poisoning bug, not a fix
+   for one — see failure-archaeology Episode 11). Do not reintroduce one.
 4. **SMTP port** (`lib/mailer.js:46-47`): default `587`; implicit TLS
    (`secure: true`) only when the port is exactly `465`.
 5. **Share expiry hours** (`lib/shares.js:14`): request-body `hours`, falsy →
@@ -179,16 +180,20 @@ Checklist:
   thumbnails 403 but video plays → CDN key problem; video won't play but
   thumbnails fine → token key problem. Full signing math in
   bunny-stream-reference; the original incident is commit 65dc992.
-- **`GATE_SECRET` failure is quieter than intended**: because `verifyGrant`
-  swallows the throw, a deploy missing `GATE_SECRET` looks healthy — pages
-  render, the email form shows — and only a matching-email request-link call
-  500s. Don't rely on the watch page itself to reveal this misconfiguration.
+- **`GATE_SECRET`/`SITE_URL` failures are quiet by design (as of 2026-07-22)**:
+  a deploy missing either looks healthy — pages render, the email form
+  shows, and `request-link` calls return the ordinary 200 even on a
+  matching email — because their errors are now caught and folded into
+  `genericOk()` rather than surfacing as a distinguishable 500 (this was a
+  deliberate anti-enumeration fix; see failure-archaeology Episode 11).
+  Don't rely on the watch page OR the request-link response to reveal
+  either misconfiguration — check server logs (`console.error`) instead.
 - **Email failures happen after the record is stored** (`pages/api/share.js`:
   `createShareRecord` before `sendShareEmail`; same order in share-bulk): a
   send-time env problem still creates live `bunnyshare:*` records.
-- **`SITE_URL` unset in dev** silently produces `https://localhost:3000` links
-  in emails (https fallback is deliberate; set the var instead of touching the
-  fallback).
+- **`SITE_URL` is required**: unset, `baseUrl()` throws everywhere it's
+  called (there's no fallback to fix by touching a heuristic anymore — see
+  above). Set it to `http://localhost:3000` in dev.
 
 ## When NOT to use this skill
 
@@ -209,7 +214,7 @@ All facts verified 2026-07-18 at commit 5905bba. Re-verify before trusting:
   `grep -rhn "process\.env\.[A-Z_]*" lib pages middleware.js -o | sort -u`
 - Documented vars: `grep -n "^[A-Z_]*=" .env.example` and the README table (`README.md:39-51`).
 - Email path selection and from-chain: `grep -n "RESEND_API_KEY\|RESEND_FROM\|SMTP_" lib/mailer.js`
-- SITE_URL fallback: `grep -n "SITE_URL" lib/shares.js pages/watch/\[token\].js`
+- SITE_URL required, no fallback: `grep -n "SITE_URL is not set\|req.headers.host" lib/shares.js` (throw present; no Host-header match)
 - GATE_SECRET fail-loud + verifyGrant swallow: `sed -n '14,22p;47,66p' lib/gate.js`
 - KV URL concatenation: `sed -n '6,17p' lib/kv.js`
 - Ignore rules: `grep -n "env" .gitignore`

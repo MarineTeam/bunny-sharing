@@ -76,9 +76,11 @@ Walk the flow and check each observation:
    `/watch/<token>`, HttpOnly, SameSite=Lax. On localhost (http) the Secure
    flag is ABSENT — that is correct: the code adds `Secure` only when
    `x-forwarded-proto` is https or SITE_URL starts with https
-   (pages/watch/[token].js). If SITE_URL in your .env.local is set to an
-   https URL, Secure WILL be set and the cookie will be dropped on plain-http
-   localhost — unset SITE_URL locally in that case.
+   (pages/watch/[token].js). SITE_URL is REQUIRED (baseUrl() throws if
+   unset — no Host-header fallback, see failure-archaeology Episode 11), so
+   for local testing set it to `http://localhost:3000`, not an https URL —
+   an https SITE_URL WILL set Secure and the cookie will be dropped on
+   plain-http localhost.
 7. Reload → plays without re-verification (cookie grant, valid until share
    expiry).
 

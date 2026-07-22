@@ -252,7 +252,7 @@ console.log("verify other token:", !!verifyGrant(g, { token: "t2" }));  // expec
 
 ### Magic link click → cookie set → but back at the email form (loop)
 
-The exchange sets the cookie then redirects to the clean URL (pages/watch/[token].js:140-154). If the redirect lands back on the email form, the browser dropped the cookie. Check the `Secure` logic (pages/watch/[token].js:146-149): the flag is added when `x-forwarded-proto` is https OR `SITE_URL` starts with https. So **testing over plain http://localhost with a production-style `SITE_URL=https://…` in your env sets `Secure` on an http response — the browser discards the cookie and you loop**. Fix for local testing: unset `SITE_URL` (or set it to the http localhost URL). In production behind https this never fires.
+The exchange sets the cookie then redirects to the clean URL (pages/watch/[token].js:140-154). If the redirect lands back on the email form, the browser dropped the cookie. Check the `Secure` logic (pages/watch/[token].js:146-149): the flag is added when `x-forwarded-proto` is https OR `SITE_URL` starts with https. So **testing over plain http://localhost with a production-style `SITE_URL=https://…` in your env sets `Secure` on an http response — the browser discards the cookie and you loop**. Fix for local testing: set `SITE_URL=http://localhost:3000` (SITE_URL is required — `baseUrl()` throws if it's unset at all, see failure-archaeology Episode 11 — so "unset it" is no longer an option, only "point it at the right URL"). In production behind https this never fires.
 
 Also check devtools > Application > Cookies for `gate_<token>`: its Max-Age equals time until share expiry (line 145) — a share expiring in seconds yields a near-dead cookie.
 

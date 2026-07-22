@@ -56,6 +56,12 @@ export default async function handler(req, res) {
 
     return genericOk();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // Same reasoning as pages/api/watch/request-link.js: never let an
+    // unexpected error become a response distinguishable from genericOk() —
+    // it only fires on the path where the email actually matched, so a
+    // 500-vs-200 split would let an attacker fingerprint valid bundle+email
+    // pairs by status code alone.
+    console.error("bundle/request-link error:", err);
+    return genericOk();
   }
 }
