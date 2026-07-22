@@ -26,6 +26,8 @@ export default function Admin() {
   const [wmDomains, setWmDomains] = useState("");
   // Per-video watermark overrides, keyed by video id -> boolean.
   const [wmByVideo, setWmByVideo] = useState({});
+  // Geo whitelist: comma/space-separated ISO country codes; empty = no restriction.
+  const [geoCountries, setGeoCountries] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -66,6 +68,7 @@ export default function Admin() {
     setWmEmails((s.watermarkExemptEmails || []).join(", "));
     setWmDomains((s.watermarkExemptDomains || []).join(", "));
     setWmByVideo(s.watermarkByVideo || {});
+    setGeoCountries((s.geoWhitelistCountries || []).join(", "));
   }
 
   // Current per-video override as a select value: "on" / "off" / "default".
@@ -106,6 +109,7 @@ export default function Admin() {
         watermarkDefault: wmDefault,
         watermarkExemptEmails: wmEmails,
         watermarkExemptDomains: wmDomains,
+        geoWhitelistCountries: geoCountries,
       }),
     });
     const data = await res.json();
@@ -408,6 +412,26 @@ export default function Admin() {
             overlay for leak attribution, not burned into the video — it deters
             casual re-sharing, it isn't DRM.
           </p>
+
+          <h3>Geo location whitelist</h3>
+          <label style={styles.settingLabel}>
+            Allowed countries — ISO codes, comma/space separated (e.g. "US, CA,
+            GB"). Leave blank to allow every country (default).
+            <textarea
+              value={geoCountries}
+              onChange={(e) => setGeoCountries(e.target.value)}
+              placeholder="US, CA, GB"
+              style={styles.textarea}
+            />
+          </label>
+          <p style={styles.hint}>
+            Applies to every /watch and /bundle page. Detected from Vercel's
+            edge network (`x-vercel-ip-country`) — it's a coarse IP-geolocation
+            signal, not identity verification, and a VPN defeats it; it's also
+            inert on non-Vercel deployments or local dev (no header means
+            access is allowed, never silently blocked).
+          </p>
+
           <button onClick={saveSettings} disabled={savingSettings} style={styles.btn}>
             {savingSettings ? "Saving..." : "Save settings"}
           </button>

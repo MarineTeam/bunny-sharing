@@ -2,6 +2,8 @@ import { useState } from "react";
 import { kvGet } from "../../lib/kv";
 import { signGrant, verifyGrant } from "../../lib/gate";
 import { getBundleMembers } from "../../lib/bundles";
+import { getSettings } from "../../lib/settings";
+import { isGeoAllowed } from "../../lib/geo";
 
 export default function BundlePage({ status, reason, bundleId, items, notice }) {
   if (status === "invalid") {
@@ -134,6 +136,11 @@ export async function getServerSideProps({ params, query, req, res }) {
   }
   if (Date.now() > bundle.expiresAt) {
     return { props: { status: "invalid", reason: "This link has expired." } };
+  }
+
+  const settings = await getSettings();
+  if (!isGeoAllowed(req, settings.geoWhitelistCountries)) {
+    return { props: { status: "invalid", reason: "This page isn't available in your region." } };
   }
 
   const bundleToken = `bundle:${bundleId}`;

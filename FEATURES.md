@@ -68,6 +68,19 @@ idempotent: revoking an already-revoked link succeeds without complaint.
 Requesting a magic link for the same share is throttled to one per 30
 seconds, so the gate can't be used to spam a recipient's inbox.
 
+### Geo location whitelist
+An optional global list of allowed countries (ISO 3166-1 alpha-2 codes,
+admin **Settings** panel) applied to every `/watch` and `/bundle` page.
+Empty by default — no restriction. When set, a visitor from outside the
+whitelist sees "This video isn't available in your region" instead of the
+email gate, checked before the email/cookie flow even starts. Detected from
+Vercel's edge network (`x-vercel-ip-country`), so it fails **open** — never
+blocking — when that header is absent (local dev, or any non-Vercel host):
+a deployment elsewhere is simply unrestricted rather than silently locking
+everyone out. It's a coarse IP-geolocation signal, the same honesty class as
+the watermark — a VPN defeats it, and it complements the email gate's
+identity check rather than replacing it.
+
 ## Watermarking
 
 Optionally overlay the recipient's verified email address across the video

@@ -41,6 +41,18 @@ Four version tags mark points release notes were cut from this history:
   `bunnysettings:global` KV namespace, edited from a Settings panel on the
   admin page and read/written via the admin-only `/api/settings` route.
 
+## 2026-07-22
+
+### Added
+- **Geo location whitelist.** An optional global list of allowed countries
+  (admin Settings panel) applied to every `/watch` and `/bundle` page,
+  checked before the email gate. Empty by default (no restriction).
+  Detected via Vercel's edge network (`x-vercel-ip-country`); fails open
+  (never blocks) when that header is absent, so a non-Vercel deployment or
+  local dev is simply unrestricted rather than silently locked out. A
+  coarse IP-geolocation signal, not identity verification — complements
+  the email gate rather than replacing it.
+
 ## v1.3.0 — 2026-07-22
 
 ### Added

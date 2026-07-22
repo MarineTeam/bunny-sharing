@@ -386,6 +386,46 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   to a bundle simply disappears from that bundle's listing page rather than
   erroring it.
 
+### (l) Geo location whitelist — ADOPTED 2026-07-22
+- **Was:** access control had two dimensions (does the recipient control the
+  right inbox — the email gate; is the link still live — revoke/expiry) but
+  no way to restrict WHERE a video could be watched from at all, regardless
+  of who verifies.
+- **What shipped:** `lib/geo.js`'s `isGeoAllowed(req, whitelist)` compares
+  Vercel's `x-vercel-ip-country` header against an admin-configured list of
+  ISO 3166-1 alpha-2 codes. New `geoWhitelistCountries` field in
+  `lib/settings.js` (default `[]`, meaning unrestricted — same
+  additive/inert-until-set pattern as every other settings field), with a
+  `normalizeCountryList` sanitizer keeping only well-formed 2-letter codes,
+  uppercased. Enforced in `getServerSideProps` of BOTH
+  `pages/watch/[token].js` and `pages/bundle/[bundleId].js`, checked right
+  after the existing not-found/revoked/expired checks and BEFORE the
+  magic-link/cookie flow starts — a geo-blocked visitor never even sees the
+  email form. Deliberately fails OPEN when the header is missing (local dev,
+  non-Vercel hosts): the whitelist is inert rather than a silent lockout off
+  the target platform. Admin UI: a new "Geo location whitelist" block in the
+  existing Settings panel, plain comma/space-separated text input, same
+  pattern as the watermark exemption lists.
+- **Verified:** L0 only (`npm run build` clean, both routes still register;
+  invariant greps re-run: middleware matcher unchanged, `gate_<token>`
+  cookie name/path unchanged, `genericOk` uniform-response block in
+  `pages/api/watch/request-link.js` untouched — this feature intentionally
+  does NOT touch that endpoint at all, since anti-enumeration invariant 4 is
+  scoped to it specifically, not to the `/watch`/`/bundle` pages, which
+  already had distinguishable invalid/revoked/expired states before this).
+  No live pass yet.
+- **Not yet exercised:** a live pass proving (a) setting a whitelist that
+  excludes the tester's own country actually blocks `/watch` and `/bundle`
+  with the new reason text, while an included country still reaches the
+  email gate; (b) the fail-open path — confirmed only by code reading, not
+  by an actual non-Vercel-header request — behaves as "allowed" rather than
+  throwing or blocking; (c) a malformed value typed into the Settings field
+  (e.g. "usa", "12", empty) is dropped by `normalizeCountryList` rather than
+  stored and silently never matching. Also out of scope on purpose: no
+  per-share or per-video override layer (unlike watermark) — this is a
+  single global list for now, since there's no concrete request yet for
+  finer-grained geo control.
+
 ## 3. Positioning: standard vs actually nice
 
 Standard practice, competently applied (claim nothing): magic links, HMAC-SHA256
