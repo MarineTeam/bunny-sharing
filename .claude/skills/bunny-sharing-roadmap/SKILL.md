@@ -470,6 +470,35 @@ repo / "you have a result when…". All are CANDIDATES — none is scheduled wor
   absent (local dev) — confirmed only by code reading; (d) the actual
   recovery story — unset `ADMIN_GEO_WHITELIST` and redeploy while
   "locked out" — has never been rehearsed end-to-end, only reasoned about.
+- **Follow-up 2026-07-22 (same day) — recipient whitelist moved to env var
+  too:** requirement ("actually wanted everything including the original
+  geo whitelist to be in env var not just admin whitelist") — the
+  recipient-facing list (originally the `geoWhitelistCountries` KV/Settings
+  field from earlier the same day) was inconsistent with the admin design
+  above for no good reason; unified onto the identical pattern. New
+  `GEO_WHITELIST` env var + `recipientGeoWhitelist()` (`lib/geo.js`,
+  refactored alongside `adminGeoWhitelist()` to share a `parseWhitelist`
+  helper). `lib/settings.js`: `geoWhitelistCountries` (an editable KV array)
+  was REPLACED by `geoWhitelistEnabled` (a plain runtime toggle, same shape
+  as `adminGeoWhitelistEnabled`); `normalizeCountryList` was deleted as
+  dead code once nothing validated a stored list anymore. Because this
+  field existed for less than a day and was never certified or (as far as
+  this repo's history shows) deployed, replacing rather than deprecating it
+  was judged safe — flagged here explicitly in case that judgment call
+  needs revisiting. `pages/watch/[token].js` and `pages/bundle/[bundleId].js`
+  both changed their check from `isGeoAllowed(req, settings.geoWhitelistCountries)`
+  to `settings.geoWhitelistEnabled && isGeoAllowed(req, recipientGeoWhitelist())`.
+  `pages/api/settings.js` GET now decorates BOTH `geoWhitelistCountries` and
+  `adminGeoWhitelistCountries` read-only from their env vars; neither is
+  ever accepted by POST. Admin UI: the recipient-facing Settings block lost
+  its free-text textarea and gained the same read-only-display-plus-toggle
+  shape as the admin block.
+- **Verified:** L0 only (`npm run build` clean; invariant greps re-run:
+  matcher/credential-compare/cookie unchanged; confirmed via grep that no
+  code path still reads/writes a persisted `geoWhitelistCountries` KV
+  field). No live pass yet — same gaps as the admin entry above, now
+  doubled (recipient side was never live-verified even under the original
+  KV design before this follow-up replaced it).
 
 ## 3. Positioning: standard vs actually nice
 

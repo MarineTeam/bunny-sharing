@@ -26,11 +26,12 @@ export default function Admin() {
   const [wmDomains, setWmDomains] = useState("");
   // Per-video watermark overrides, keyed by video id -> boolean.
   const [wmByVideo, setWmByVideo] = useState({});
-  // Geo whitelist: comma/space-separated ISO country codes; empty = no restriction.
-  const [geoCountries, setGeoCountries] = useState("");
-  // Admin-surface geo whitelist: the country list is read-only here (sourced
-  // from the ADMIN_GEO_WHITELIST env var, not editable in this UI); only the
-  // enforcement toggle is saved from here.
+  // Recipient-facing geo whitelist: the country list is read-only here
+  // (sourced from the GEO_WHITELIST env var, not editable in this UI); only
+  // the enforcement toggle is saved from here.
+  const [geoEnabled, setGeoEnabled] = useState(false);
+  const [geoCountries, setGeoCountries] = useState([]);
+  // Admin-surface geo whitelist: same pattern, sourced from ADMIN_GEO_WHITELIST.
   const [adminGeoEnabled, setAdminGeoEnabled] = useState(false);
   const [adminGeoCountries, setAdminGeoCountries] = useState([]);
   const [savingSettings, setSavingSettings] = useState(false);
@@ -73,7 +74,8 @@ export default function Admin() {
     setWmEmails((s.watermarkExemptEmails || []).join(", "));
     setWmDomains((s.watermarkExemptDomains || []).join(", "));
     setWmByVideo(s.watermarkByVideo || {});
-    setGeoCountries((s.geoWhitelistCountries || []).join(", "));
+    setGeoEnabled(!!s.geoWhitelistEnabled);
+    setGeoCountries(s.geoWhitelistCountries || []);
     setAdminGeoEnabled(!!s.adminGeoWhitelistEnabled);
     setAdminGeoCountries(s.adminGeoWhitelistCountries || []);
   }
@@ -116,7 +118,7 @@ export default function Admin() {
         watermarkDefault: wmDefault,
         watermarkExemptEmails: wmEmails,
         watermarkExemptDomains: wmDomains,
-        geoWhitelistCountries: geoCountries,
+        geoWhitelistEnabled: geoEnabled,
         adminGeoWhitelistEnabled: adminGeoEnabled,
       }),
     });
@@ -422,23 +424,31 @@ export default function Admin() {
           </p>
 
           <h3>Geo location whitelist</h3>
-          <label style={styles.settingLabel}>
-            Allowed countries — ISO codes, comma/space separated (e.g. "US, CA,
-            GB"). Leave blank to allow every country (default).
-            <textarea
-              value={geoCountries}
-              onChange={(e) => setGeoCountries(e.target.value)}
-              placeholder="US, CA, GB"
-              style={styles.textarea}
-            />
-          </label>
           <p style={styles.hint}>
-            Applies to every /watch and /bundle page. Detected from Vercel's
-            edge network (`x-vercel-ip-country`) — it's a coarse IP-geolocation
-            signal, not identity verification, and a VPN defeats it; it's also
-            inert on non-Vercel deployments or local dev (no header means
-            access is allowed, never silently blocked).
+            Restricts every /watch and /bundle page. The country list itself
+            is <strong>not</strong> editable here — it's set via the{" "}
+            <code>GEO_WHITELIST</code> environment variable in your hosting
+            provider's dashboard, on purpose: it keeps the list out of reach
+            of a mistyped Settings save, and consistent with the admin
+            whitelist below.
+            {geoCountries.length > 0 ? (
+              <> Currently configured: <strong>{geoCountries.join(", ")}</strong>.</>
+            ) : (
+              <> Not currently configured — this toggle has no effect until <code>GEO_WHITELIST</code> is set.</>
+            )}
+            {" "}Detected from Vercel's edge network (<code>x-vercel-ip-country</code>)
+            — a coarse IP-geolocation signal, not identity verification (a VPN
+            defeats it), and inert on non-Vercel deployments or local dev (no
+            header means access is allowed, never silently blocked).
           </p>
+          <label style={{ display: "block", marginBottom: 12 }}>
+            <input
+              type="checkbox"
+              checked={geoEnabled}
+              onChange={(e) => setGeoEnabled(e.target.checked)}
+            />{" "}
+            Enforce the geo whitelist
+          </label>
 
           <h3>Admin access geo whitelist</h3>
           <p style={styles.hint}>

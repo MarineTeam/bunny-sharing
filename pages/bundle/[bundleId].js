@@ -3,7 +3,7 @@ import { kvGet } from "../../lib/kv";
 import { signGrant, verifyGrant } from "../../lib/gate";
 import { getBundleMembers } from "../../lib/bundles";
 import { getSettings } from "../../lib/settings";
-import { isGeoAllowed } from "../../lib/geo";
+import { isGeoAllowed, recipientGeoWhitelist } from "../../lib/geo";
 
 export default function BundlePage({ status, reason, bundleId, items, notice }) {
   if (status === "invalid") {
@@ -139,7 +139,7 @@ export async function getServerSideProps({ params, query, req, res }) {
   }
 
   const settings = await getSettings();
-  if (!isGeoAllowed(req, settings.geoWhitelistCountries)) {
+  if (settings.geoWhitelistEnabled && !isGeoAllowed(req, recipientGeoWhitelist())) {
     return { props: { status: "invalid", reason: "This page isn't available in your region." } };
   }
 

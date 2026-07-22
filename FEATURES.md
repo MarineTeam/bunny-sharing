@@ -69,30 +69,34 @@ Requesting a magic link for the same share is throttled to one per 30
 seconds, so the gate can't be used to spam a recipient's inbox.
 
 ### Geo location whitelist
-An optional global list of allowed countries (ISO 3166-1 alpha-2 codes,
-admin **Settings** panel) applied to every `/watch` and `/bundle` page.
-Empty by default — no restriction. When set, a visitor from outside the
-whitelist sees "This video isn't available in your region" instead of the
-email gate, checked before the email/cookie flow even starts. Detected from
-Vercel's edge network (`x-vercel-ip-country`), so it fails **open** — never
-blocking — when that header is absent (local dev, or any non-Vercel host):
-a deployment elsewhere is simply unrestricted rather than silently locking
-everyone out. It's a coarse IP-geolocation signal, the same honesty class as
-the watermark — a VPN defeats it, and it complements the email gate's
-identity check rather than replacing it.
+An optional list of allowed countries (ISO 3166-1 alpha-2 codes) applied to
+every `/watch` and `/bundle` page. The list itself is set via the
+`GEO_WHITELIST` environment variable — **not** a Settings-panel field —
+deliberately, so it can't be mistyped into a form and saved instantly. The
+Settings panel only has an ON/OFF enforcement toggle (`geoWhitelistEnabled`,
+off by default, inert until `GEO_WHITELIST` is also set) and a read-only
+display of whatever the env var currently contains. When enforced, a
+visitor from outside the whitelist sees "This video isn't available in your
+region" instead of the email gate, checked before the email/cookie flow
+even starts. Detected from Vercel's edge network (`x-vercel-ip-country`),
+so it fails **open** — never blocking — when that header is absent (local
+dev, or any non-Vercel host): a deployment elsewhere is simply unrestricted
+rather than silently locking everyone out. It's a coarse IP-geolocation
+signal, the same honesty class as the watermark — a VPN defeats it, and it
+complements the email gate's identity check rather than replacing it.
 
 ### Admin geo whitelist
 The admin page and its API routes can be geo-restricted too, on top of the
-`ADMIN_USER`/`ADMIN_PASS` credentials. Unlike the recipient-facing
-whitelist above, the country list here is set via the `ADMIN_GEO_WHITELIST`
-environment variable, not a Settings-panel field — deliberately, so it can
-never be edited from inside the admin UI it protects. The Settings panel
-only has an ON/OFF enforcement toggle (`adminGeoWhitelistEnabled`, off by
-default) and a read-only display of whatever the env var currently
-contains. If enabling this ever locks an admin out, recovery is unsetting
-`ADMIN_GEO_WHITELIST` in the hosting dashboard and redeploying — a path
-that doesn't depend on reaching the app at all. Same fail-open behavior as
-the recipient-facing whitelist when the geo header is absent.
+`ADMIN_USER`/`ADMIN_PASS` credentials — same pattern as above, its own env
+var (`ADMIN_GEO_WHITELIST`), its own Settings toggle
+(`adminGeoWhitelistEnabled`, off by default), and its own read-only display.
+Kept as a fully separate list and toggle from the recipient-facing one
+above (different risk: locking out an admin vs. a recipient), but the
+underlying design reasoning is identical: keeping the list itself out of
+the admin-editable UI means recovery from a bad list is always unsetting
+the env var in the hosting dashboard and redeploying — a path that doesn't
+depend on reaching the app at all. Same fail-open behavior when the geo
+header is absent.
 
 ## Watermarking
 

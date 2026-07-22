@@ -3,7 +3,7 @@ import { kvGet, kvSet } from "../../lib/kv";
 import { generateEmbedUrl } from "../../lib/bunny";
 import { signGrant, verifyGrant } from "../../lib/gate";
 import { getSettings, getVideoWatermark, resolveWatermark } from "../../lib/settings";
-import { isGeoAllowed } from "../../lib/geo";
+import { isGeoAllowed, recipientGeoWhitelist } from "../../lib/geo";
 
 export default function WatchPage({
   status,
@@ -329,7 +329,7 @@ export async function getServerSideProps({ params, query, req, res }) {
   }
 
   const settings = await getSettings();
-  if (!isGeoAllowed(req, settings.geoWhitelistCountries)) {
+  if (settings.geoWhitelistEnabled && !isGeoAllowed(req, recipientGeoWhitelist())) {
     return { props: { status: "invalid", reason: "This video isn't available in your region." } };
   }
 

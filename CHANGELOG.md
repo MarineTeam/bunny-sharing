@@ -44,20 +44,20 @@ Four version tags mark points release notes were cut from this history:
 ## 2026-07-22
 
 ### Added
-- **Admin geo whitelist.** The admin page and its API routes can now also be
-  geo-restricted, on top of Basic Auth. The country list is set via a new
-  `ADMIN_GEO_WHITELIST` env var (not a Settings field) plus a new Settings
-  toggle to enforce it (off by default) — the list is deliberately kept out
-  of the in-app UI so a misconfigured lockout is always recoverable from
-  the hosting dashboard, never trapped behind the page it protects.
-- **Geo location whitelist.** An optional global list of allowed countries
-  (admin Settings panel) applied to every `/watch` and `/bundle` page,
-  checked before the email gate. Empty by default (no restriction).
-  Detected via Vercel's edge network (`x-vercel-ip-country`); fails open
-  (never blocks) when that header is absent, so a non-Vercel deployment or
-  local dev is simply unrestricted rather than silently locked out. A
-  coarse IP-geolocation signal, not identity verification — complements
-  the email gate rather than replacing it.
+- **Geo location whitelists (recipient + admin), both env-var-based.** Two
+  independent country whitelists, same design: `/watch` and `/bundle` pages
+  can be restricted via `GEO_WHITELIST`; the admin page and its API routes
+  can be restricted via `ADMIN_GEO_WHITELIST`, on top of Basic Auth. Both
+  lists live ONLY in env vars, never in the admin-editable Settings
+  record — the Settings panel just has an ON/OFF toggle for each (off by
+  default) and a read-only display of what's configured, so a bad list is
+  always recoverable from the hosting dashboard, never trapped behind a
+  page it's blocking. Detected via Vercel's edge network
+  (`x-vercel-ip-country`); both fail open (never block) when that header
+  is absent, so a non-Vercel deployment or local dev is simply
+  unrestricted rather than silently locked out. A coarse IP-geolocation
+  signal, not identity verification — complements the email gate/admin
+  credentials rather than replacing them.
 
 ## v1.3.0 — 2026-07-22
 

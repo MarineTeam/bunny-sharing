@@ -1,5 +1,5 @@
 import { getSettings, saveSettings } from "../../lib/settings";
-import { adminGeoWhitelist } from "../../lib/geo";
+import { adminGeoWhitelist, recipientGeoWhitelist } from "../../lib/geo";
 
 // Admin-only. Not under /api/watch/ or /api/bundle/, so the middleware matcher
 // puts it behind Basic Auth automatically (invariant 7) — no per-route check
@@ -8,13 +8,17 @@ export default async function handler(req, res) {
   try {
     if (req.method === "GET") {
       const settings = await getSettings();
-      // adminGeoWhitelistCountries is READ-ONLY decoration sourced from the
-      // ADMIN_GEO_WHITELIST env var, not the KV record — shown in the admin
-      // UI so an admin can see what's configured, but saveSettings below
-      // never accepts or persists it (see lib/geo.js for why the list
-      // itself must stay outside anything the admin UI can edit).
+      // geoWhitelistCountries / adminGeoWhitelistCountries are READ-ONLY
+      // decoration sourced from env vars, not the KV record — shown in the
+      // admin UI so an admin can see what's configured, but saveSettings
+      // below never accepts or persists either (see lib/geo.js for why both
+      // lists must stay outside anything the admin UI can edit).
       return res.status(200).json({
-        settings: { ...settings, adminGeoWhitelistCountries: adminGeoWhitelist() },
+        settings: {
+          ...settings,
+          geoWhitelistCountries: recipientGeoWhitelist(),
+          adminGeoWhitelistCountries: adminGeoWhitelist(),
+        },
       });
     }
     if (req.method === "POST") {
