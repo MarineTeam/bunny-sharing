@@ -373,20 +373,23 @@ export default function Admin() {
 
   return (
     <div style={styles.wrap}>
-      <h1>Video Library</h1>
+      <header style={styles.header}>
+        <h1 style={styles.h1}>Video Library</h1>
+        <p style={styles.subtitle}>Share videos privately and manage active links</p>
+      </header>
       {message && <p style={styles.message}>{message}</p>}
 
       <div style={styles.panelToggles}>
-        <button onClick={() => setShowSettings((v) => !v)} style={styles.btnSecondary}>
+        <button onClick={() => setShowSettings((v) => !v)} className="btn btn-secondary">
           {showSettings ? "Hide settings" : "⚙ Settings"}
         </button>
-        <button onClick={() => setShowAnalytics((v) => !v)} style={styles.btnSecondary}>
+        <button onClick={() => setShowAnalytics((v) => !v)} className="btn btn-secondary">
           {showAnalytics ? "Hide analytics" : "📊 Analytics"}
         </button>
       </div>
 
       {showSettings && (
-        <div style={styles.panel}>
+        <div className="panel">
           <h3 style={{ marginTop: 0 }}>Watermark settings</h3>
           <label style={{ display: "block", marginBottom: 12 }}>
             <input
@@ -473,19 +476,20 @@ export default function Admin() {
             Enforce the admin geo whitelist
           </label>
 
-          <button onClick={saveSettings} disabled={savingSettings} style={styles.btn}>
+          <button onClick={saveSettings} disabled={savingSettings} className="btn btn-primary">
             {savingSettings ? "Saving..." : "Save settings"}
           </button>
         </div>
       )}
 
       {showAnalytics && (
-        <div style={styles.panel}>
+        <div className="panel">
           <h3 style={{ marginTop: 0 }}>Per-video analytics</h3>
           {analytics.length === 0 ? (
             <p style={styles.hint}>No shares yet.</p>
           ) : (
-            <table style={styles.table}>
+            <div className="table-scroll">
+            <table className="data-table">
               <thead>
                 <tr>
                   <th style={styles.thLeft}>Video</th>
@@ -513,19 +517,21 @@ export default function Admin() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       )}
 
       {selected.size > 0 && (
-        <div style={styles.bulkBar}>
+        <div className="bulk-bar">
           <strong>{selected.size} selected</strong>
           <input
             type="text"
             placeholder="recipient emails, comma-separated"
             value={bulkEmail}
             onChange={(e) => setBulkEmail(e.target.value)}
-            style={{ ...styles.input, flex: "1 1 220px", width: "auto", marginTop: 0 }}
+            className="input"
+            style={{ flex: "1 1 220px", width: "auto" }}
           />
           <label style={{ whiteSpace: "nowrap" }}>
             Valid for (hrs):{" "}
@@ -533,7 +539,8 @@ export default function Admin() {
               type="number"
               value={bulkHours}
               onChange={(e) => setBulkHours(e.target.value)}
-              style={{ width: 70 }}
+              className="input"
+              style={{ width: 70, display: "inline-block" }}
             />
           </label>
           <label style={{ whiteSpace: "nowrap" }}>
@@ -547,11 +554,11 @@ export default function Admin() {
           <button
             onClick={submitBulk}
             disabled={!bulkEmail || bulkSending}
-            style={styles.btn}
+            className="btn btn-primary"
           >
             {bulkSending ? "Sending..." : `Send ${selected.size} video${selected.size !== 1 ? "s" : ""} (separate links per recipient)`}
           </button>
-          <button onClick={() => setSelected(new Set())} style={styles.btnSecondary}>
+          <button onClick={() => setSelected(new Set())} className="btn btn-secondary">
             Clear
           </button>
         </div>
@@ -559,9 +566,9 @@ export default function Admin() {
 
       <div style={styles.grid}>
         {videos.map((v) => (
-          <div key={v.id} style={{ ...styles.card, outline: selected.has(v.id) ? "2px solid #1f6feb" : "none" }}>
+          <div key={v.id} className={`video-card${selected.has(v.id) ? " selected" : ""}`}>
             {v.thumbnail && <img src={v.thumbnail} alt={v.title} style={styles.thumb} />}
-            <div style={{ padding: 10 }}>
+            <div style={{ padding: 12 }}>
               <label style={styles.selectLabel}>
                 <input
                   type="checkbox"
@@ -570,7 +577,7 @@ export default function Admin() {
                 />{" "}
                 Select
               </label>
-              <strong>{v.title}</strong>
+              <strong style={styles.cardTitle}>{v.title}</strong>
               <label style={styles.videoWmLabel}>
                 Watermark:{" "}
                 <select
@@ -583,7 +590,7 @@ export default function Admin() {
                 </select>
               </label>
               <div>
-                <button onClick={() => setShareForVideo(v)} style={styles.btn}>
+                <button onClick={() => setShareForVideo(v)} className="btn btn-primary" style={{ marginTop: 10 }}>
                   Share
                 </button>
               </div>
@@ -593,69 +600,74 @@ export default function Admin() {
       </div>
 
       {shareForVideo && (
-        <div style={styles.modal}>
-          <h3>Share "{shareForVideo.title}"</h3>
-          <input
-            type="email"
-            placeholder="recipient@email.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            style={styles.input}
-          />
-          <div style={{ marginTop: 8 }}>
-            <label>Link valid for (hours): </label>
+        <div className="modal-overlay" onClick={() => setShareForVideo(null)}>
+          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0 }}>Share "{shareForVideo.title}"</h3>
             <input
-              type="number"
-              value={hours}
-              onChange={(e) => setHours(e.target.value)}
-              style={{ width: 80 }}
+              type="email"
+              placeholder="recipient@email.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="input"
+              autoFocus
             />
-          </div>
-          <div style={{ marginTop: 8 }}>
-            <label>Watermark viewer's email: </label>
-            <select value={watermark} onChange={(e) => setWatermark(e.target.value)}>
-              <option value="default">Default (global setting)</option>
-              <option value="on">Always</option>
-              <option value="off">Never</option>
-            </select>
-          </div>
-          <div style={{ marginTop: 12 }}>
-            <button onClick={() => submitShare(shareForVideo)} style={styles.btn}>
-              Send
-            </button>
-            <button onClick={() => setShareForVideo(null)} style={styles.btnSecondary}>
-              Cancel
-            </button>
+            <div style={{ marginTop: 12 }}>
+              <label style={styles.fieldLabel}>Link valid for (hours)</label>
+              <input
+                type="number"
+                value={hours}
+                onChange={(e) => setHours(e.target.value)}
+                className="input"
+                style={{ width: 100 }}
+              />
+            </div>
+            <div style={{ marginTop: 12 }}>
+              <label style={styles.fieldLabel}>Watermark viewer's email</label>
+              <select value={watermark} onChange={(e) => setWatermark(e.target.value)} style={{ width: "100%" }}>
+                <option value="default">Default (global setting)</option>
+                <option value="on">Always</option>
+                <option value="off">Never</option>
+              </select>
+            </div>
+            <div style={{ marginTop: 20, display: "flex", gap: 8 }}>
+              <button onClick={() => submitShare(shareForVideo)} className="btn btn-primary">
+                Send
+              </button>
+              <button onClick={() => setShareForVideo(null)} className="btn btn-secondary">
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 40 }}>
+      <div style={styles.sectionHeader}>
         <h2 style={{ margin: 0 }}>Shared Links</h2>
-        <button onClick={cleanup} style={styles.btnCleanup}>
+        <button onClick={cleanup} className="btn btn-muted">
           🗑 Clean up expired &amp; revoked
         </button>
       </div>
 
       {selectedShares.size > 0 && (
-        <div style={styles.bulkBar}>
+        <div className="bulk-bar">
           <strong>{selectedShares.size} link{selectedShares.size !== 1 ? "s" : ""} selected</strong>
-          <button onClick={resendSelected} disabled={resendingBulk} style={styles.btn}>
+          <button onClick={resendSelected} disabled={resendingBulk} className="btn btn-primary">
             {resendingBulk ? "Resending..." : `Resend ${selectedShares.size}`}
           </button>
-          <button onClick={extendSelected} disabled={extendingBulk} style={styles.btn}>
+          <button onClick={extendSelected} disabled={extendingBulk} className="btn btn-primary">
             {extendingBulk ? "Extending..." : `Extend ${selectedShares.size}`}
           </button>
-          <button onClick={revokeSelected} disabled={revokingBulk} style={styles.btnDanger}>
+          <button onClick={revokeSelected} disabled={revokingBulk} className="btn btn-danger">
             {revokingBulk ? "Revoking..." : `Revoke ${selectedShares.size}`}
           </button>
-          <button onClick={() => setSelectedShares(new Set())} style={styles.btnSecondary}>
+          <button onClick={() => setSelectedShares(new Set())} className="btn btn-secondary">
             Clear
           </button>
         </div>
       )}
 
-      <table style={styles.table}>
+      <div className="table-scroll">
+      <table className="data-table">
         <thead>
           <tr>
             <th></th>
@@ -711,7 +723,7 @@ export default function Admin() {
                   )}
                 </td>
                 <td>
-                  {statusOf(s)}
+                  <span className={`status-pill status-${statusOf(s).toLowerCase()}`}>{statusOf(s)}</span>
                   {s.emailFailed && (
                     <div style={styles.emailFailedBadge} title={s.emailError || "Email failed to send"}>
                       ⚠ email failed
@@ -725,29 +737,29 @@ export default function Admin() {
                   {s.completedAt ? "100% ✓" : s.maxProgressPct ? `${s.maxProgressPct}%` : s.playCount ? "started" : "—"}
                 </td>
                 <td>{new Date(s.expiresAt).toLocaleString()}</td>
-                <td>
+                <td style={{ whiteSpace: "nowrap" }}>
                   {active && (
-                    <button onClick={() => resend(s.token)} style={styles.btn}>
+                    <button onClick={() => resend(s.token)} className="btn btn-secondary" style={styles.rowBtn}>
                       Resend
                     </button>
                   )}
                   {extendable && (
-                    <button onClick={() => extend(s.token)} style={styles.btn}>
+                    <button onClick={() => extend(s.token)} className="btn btn-secondary" style={styles.rowBtn}>
                       Extend
                     </button>
                   )}
                   {active && (
-                    <button onClick={() => revoke(s.token)} style={styles.btnDanger}>
+                    <button onClick={() => revoke(s.token)} className="btn btn-danger" style={styles.rowBtn}>
                       Revoke
                     </button>
                   )}
                   {s.revoked && (
-                    <button onClick={() => unrevoke(s.token)} style={styles.btn}>
+                    <button onClick={() => unrevoke(s.token)} className="btn btn-secondary" style={styles.rowBtn}>
                       Restore
                     </button>
                   )}
                   {s.revoked && (
-                    <button onClick={() => deletePermanently(s.token)} style={styles.btnDanger}>
+                    <button onClick={() => deletePermanently(s.token)} className="btn btn-danger" style={styles.rowBtn}>
                       Delete permanently
                     </button>
                   )}
@@ -757,6 +769,7 @@ export default function Admin() {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }
@@ -809,29 +822,26 @@ function computeAnalytics(shares) {
 }
 
 const styles = {
-  wrap: { fontFamily: "system-ui, sans-serif", maxWidth: 1000, margin: "0 auto", padding: 20 },
+  wrap: { maxWidth: 1100, margin: "0 auto", padding: "28px 20px 60px" },
+  header: { marginBottom: 20 },
+  h1: { margin: "0 0 4px", fontSize: 28 },
+  subtitle: { margin: 0, color: "#57606a", fontSize: 14 },
+  sectionHeader: { display: "flex", alignItems: "center", gap: 16, marginTop: 44, marginBottom: 16 },
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 16 },
-  card: { border: "1px solid #ddd", borderRadius: 8, overflow: "hidden" },
-  thumb: { width: "100%", height: 120, objectFit: "cover" },
-  btn: { background: "#1f6feb", color: "white", border: 0, padding: "6px 12px", borderRadius: 6, cursor: "pointer", marginTop: 8, marginRight: 8 },
-  btnSecondary: { background: "#eee", border: 0, padding: "6px 12px", borderRadius: 6, cursor: "pointer" },
-  btnDanger: { background: "#d1242f", color: "white", border: 0, padding: "4px 10px", borderRadius: 6, cursor: "pointer" },
-  input: { width: "100%", padding: 8, border: "1px solid #ccc", borderRadius: 6 },
-  modal: { border: "1px solid #ccc", borderRadius: 8, padding: 16, marginTop: 20, background: "#fafafa" },
-  table: { width: "100%", borderCollapse: "collapse", marginTop: 12 },
-  btnCleanup: { background: "#6e7681", color: "white", border: 0, padding: "6px 12px", borderRadius: 6, cursor: "pointer", fontSize: 14 },
-  message: { color: "#1f6feb" },
-  bulkBar: { display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: 12, marginBottom: 16, border: "1px solid #1f6feb", background: "#eef4ff", borderRadius: 8 },
+  thumb: { width: "100%", height: 124, objectFit: "cover", display: "block", background: "#eee" },
+  cardTitle: { display: "block", fontSize: 15, margin: "2px 0 6px" },
+  message: { color: "#1f6feb", background: "#eef4ff", padding: "8px 12px", borderRadius: 6, fontSize: 14 },
   selectLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4, cursor: "pointer" },
   videoWmLabel: { display: "block", fontSize: 12, color: "#57606a", margin: "6px 0" },
   emailFailedBadge: { fontSize: 12, color: "#d1242f" },
-  panelToggles: { display: "flex", gap: 10, margin: "8px 0 4px" },
-  panel: { border: "1px solid #d0d7de", borderRadius: 8, padding: 16, margin: "8px 0 20px", background: "#f6f8fa" },
+  panelToggles: { display: "flex", gap: 10, margin: "8px 0 20px" },
   settingLabel: { display: "block", fontSize: 14, color: "#24292f", marginBottom: 12 },
+  fieldLabel: { display: "block", fontSize: 13, color: "#57606a", marginBottom: 4 },
   textarea: { display: "block", width: "100%", minHeight: 48, marginTop: 4, padding: 8, border: "1px solid #ccc", borderRadius: 6, fontFamily: "inherit", fontSize: 14, boxSizing: "border-box" },
   hint: { fontSize: 13, color: "#57606a" },
   thLeft: { textAlign: "left" },
   tdCenter: { textAlign: "center" },
   wmBadge: { marginLeft: 6, fontSize: 12 },
   wmBadgeOff: { marginLeft: 6, fontSize: 11, color: "#57606a", border: "1px solid #d0d7de", borderRadius: 4, padding: "0 4px" },
+  rowBtn: { padding: "5px 10px", fontSize: 13, marginRight: 6 },
 };

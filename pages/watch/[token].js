@@ -19,9 +19,11 @@ export default function WatchPage({
 }) {
   if (status === "invalid") {
     return (
-      <div style={styles.wrap}>
-        <h2>This link isn't available</h2>
-        <p>{reason}</p>
+      <div className="recipient-page">
+        <div className="recipient-card">
+          <h2 style={{ marginTop: 0 }}>This link isn't available</h2>
+          <p style={styles.muted}>{reason}</p>
+        </div>
       </div>
     );
   }
@@ -202,8 +204,9 @@ function Player({ embedUrl, title, token, trackAuth, watermarkText, resumeSec, d
   }, [token, trackAuth, post]);
 
   return (
-    <div style={styles.wrap}>
-      <h2>{title}</h2>
+    <div className="recipient-page wide">
+      <div className="recipient-card" style={styles.playerCard}>
+      <h2 style={{ marginTop: 0 }}>{title}</h2>
       <div style={styles.playerBox}>
         <iframe
           ref={iframeRef}
@@ -225,6 +228,7 @@ function Player({ embedUrl, title, token, trackAuth, watermarkText, resumeSec, d
             </button>
           </div>
         )}
+      </div>
       </div>
     </div>
   );
@@ -261,39 +265,44 @@ function EmailGate({ token, title, notice }) {
 
   if (state === "sent") {
     return (
-      <div style={styles.wrap}>
-        <h2>Check your email</h2>
-        <p>{message}</p>
-        <p style={styles.muted}>
-          Click the link in that email to start watching. It expires shortly, so
-          if it's been a while just request a new one.
-        </p>
+      <div className="recipient-page">
+        <div className="recipient-card">
+          <h2 style={{ marginTop: 0 }}>Check your email</h2>
+          <p>{message}</p>
+          <p style={styles.muted}>
+            Click the link in that email to start watching. It expires shortly, so
+            if it's been a while just request a new one.
+          </p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={styles.wrap}>
-      <h2>Confirm your email to watch{title ? ` "${title}"` : ""}</h2>
-      <p style={styles.muted}>
-        This video was shared privately. Enter the email address it was shared
-        with and we'll send you a one-time sign-in link.
-      </p>
-      {notice && <p style={styles.notice}>{notice}</p>}
-      <form onSubmit={submit} style={styles.form}>
-        <input
-          type="email"
-          required
-          placeholder="you@email.com"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          style={styles.input}
-        />
-        <button type="submit" disabled={state === "sending"} style={styles.btn}>
-          {state === "sending" ? "Sending..." : "Email me a sign-in link"}
-        </button>
-      </form>
-      {state === "error" && <p style={styles.error}>{message}</p>}
+    <div className="recipient-page">
+      <div className="recipient-card">
+        <h2 style={{ marginTop: 0 }}>Confirm your email to watch{title ? ` "${title}"` : ""}</h2>
+        <p style={styles.muted}>
+          This video was shared privately. Enter the email address it was shared
+          with and we'll send you a one-time sign-in link.
+        </p>
+        {notice && <p style={styles.notice}>{notice}</p>}
+        <form onSubmit={submit} style={styles.form}>
+          <input
+            type="email"
+            required
+            placeholder="you@email.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            className="input"
+            style={{ flex: "1 1 240px" }}
+          />
+          <button type="submit" disabled={state === "sending"} className="btn btn-primary">
+            {state === "sending" ? "Sending..." : "Email me a sign-in link"}
+          </button>
+        </form>
+        {state === "error" && <p style={styles.error}>{message}</p>}
+      </div>
     </div>
   );
 }
@@ -426,15 +435,13 @@ export async function getServerSideProps({ params, query, req, res }) {
 }
 
 const styles = {
-  wrap: { maxWidth: 900, margin: "40px auto", padding: 20, fontFamily: "system-ui, sans-serif" },
-  playerBox: { position: "relative", paddingTop: "56.25%" },
+  playerCard: { maxWidth: 960, width: "100%" },
+  playerBox: { position: "relative", paddingTop: "56.25%", borderRadius: 8, overflow: "hidden" },
   iframe: { position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: 0 },
   muted: { color: "#57606a" },
   notice: { color: "#9a6700", background: "#fff8c5", padding: "8px 12px", borderRadius: 6 },
   error: { color: "#d1242f" },
   form: { display: "flex", gap: 8, flexWrap: "wrap", marginTop: 16 },
-  input: { flex: "1 1 240px", padding: 10, border: "1px solid #ccc", borderRadius: 6, fontSize: 15 },
-  btn: { background: "#1f6feb", color: "white", border: 0, padding: "10px 16px", borderRadius: 6, cursor: "pointer", fontSize: 15 },
   // Watermark overlay. pointerEvents:none so the player's own controls stay
   // fully usable underneath. Low opacity keeps it non-intrusive.
   wmOverlay: { position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 2 },
