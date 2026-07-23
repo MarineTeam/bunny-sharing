@@ -18,7 +18,33 @@ Five version tags mark points release notes were cut from this history:
 
 ## 2026-07-22 (post-v1.4.0)
 
+### Added
+- **Admin geo bypass list.** `ADMIN_GEO_BYPASS_EMAILS` lists Basic Auth
+  usernames (case-insensitive) that always skip the admin geo check,
+  regardless of country or the enforcement toggle — checked first, with no
+  KV lookup. Same env-var-only, read-only-in-Settings pattern as the geo
+  whitelists themselves. Meant to be armed **before** traveling, not used
+  to escape a lockout after the fact: env var changes need a redeploy.
+
 ### Fixed
+- **Host header poisoning in email links (CodeQL critical, alerts #5/#6).**
+  `baseUrl()` (`lib/shares.js`) used to fall back to the request's `Host`
+  header — client-suppliable — whenever `SITE_URL` was unset, letting a
+  forged request make the app email real recipients a legitimate-looking
+  notification pointing at an attacker's domain. The 2026-07-10 XSS fix
+  (`escapeHtml`/`isValidUrl`) never covered this — `isValidUrl` only checks
+  a link is well-formed `http(s)`, not that the host is actually this app.
+  `SITE_URL` is now required; `baseUrl()` throws if it's unset, same
+  fail-loud pattern as `GATE_SECRET`, with no Host-header fallback at all.
+  Also hardened the two public gate endpoints
+  (`/api/watch/request-link`, `/api/bundle/request-link`): their `catch`
+  blocks used to return a distinguishable 500 on any thrown error, but that
+  only ever fires on the path where the email already matched — so a
+  missing `SITE_URL`/`GATE_SECRET` would otherwise become a live oracle for
+  valid token+email pairs. Both now fold into the same `genericOk()`
+  response as every other outcome. (A related CodeQL alert, #7, "polynomial
+  regex" on `lib/gate.js`, was investigated and found to be a false
+  positive — benchmarked linear from 1K to 1M-char inputs — no code change.)
 - **Upgraded `next` 16.2.10 → 16.2.11**, patching a middleware/proxy-bypass
   advisory (GHSA-6gpp-xcg3-4w24) and a Server Actions denial-of-service
   advisory (GHSA-m99w-x7hq-7vfj), both flagged high-severity. Straight

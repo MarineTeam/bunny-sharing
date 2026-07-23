@@ -1,5 +1,5 @@
 import { getSettings, saveSettings } from "../../lib/settings";
-import { adminGeoWhitelist, recipientGeoWhitelist } from "../../lib/geo";
+import { adminGeoWhitelist, adminGeoBypassEmails, recipientGeoWhitelist } from "../../lib/geo";
 
 // Admin-only. Not under /api/watch/ or /api/bundle/, so the middleware matcher
 // puts it behind Basic Auth automatically (invariant 7) — no per-route check
@@ -18,6 +18,7 @@ export default async function handler(req, res) {
           ...settings,
           geoWhitelistCountries: recipientGeoWhitelist(),
           adminGeoWhitelistCountries: adminGeoWhitelist(),
+          adminGeoBypassEmails: adminGeoBypassEmails(),
         },
       });
     }

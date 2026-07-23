@@ -98,6 +98,14 @@ the env var in the hosting dashboard and redeploying — a path that doesn't
 depend on reaching the app at all. Same fail-open behavior when the geo
 header is absent.
 
+A standing bypass, `ADMIN_GEO_BYPASS_EMAILS`, lists Basic Auth usernames
+(case-insensitive) that skip the admin geo check entirely, regardless of
+country or the enforcement toggle — checked first, before any KV lookup.
+It's meant to be armed **before** traveling, not reached for after being
+locked out: env var changes need a redeploy, so this only helps if it was
+already set. Same env-var-only, read-only-in-Settings pattern as the lists
+above.
+
 ## Watermarking
 
 Optionally overlay the recipient's verified email address across the video

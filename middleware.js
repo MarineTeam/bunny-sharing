@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { kvGet } from "./lib/kv";
-import { adminGeoWhitelist, isGeoAllowedEdge } from "./lib/geo";
+import { adminGeoWhitelist, adminGeoBypassEmails, isGeoAllowedEdge } from "./lib/geo";
 
 // Protects the admin page and its API routes with HTTP Basic Auth.
 // The /watch/[token] and /bundle/[bundleId] pages are NOT covered, so
@@ -29,8 +29,13 @@ export async function middleware(req) {
       // off in the Settings panel without a redeploy — but the ultimate
       // recovery path if it ever locks someone out is unsetting the env
       // var in the hosting dashboard, a surface this check can't reach.
+      // A username listed in ADMIN_GEO_BYPASS_EMAILS short-circuits straight
+      // past the country/toggle check below — no KV call, regardless of
+      // country or whether enforcement is even on. It's a standing safety
+      // net meant to be armed before traveling, not an in-the-moment fix
+      // (env var changes need a redeploy).
       const whitelist = adminGeoWhitelist();
-      if (whitelist.length > 0) {
+      if (whitelist.length > 0 && !adminGeoBypassEmails().includes(u.toLowerCase())) {
         const settings = await kvGet("bunnysettings:global");
         if (settings && settings.adminGeoWhitelistEnabled && !isGeoAllowedEdge(req, whitelist)) {
           return new NextResponse("Admin access is restricted from your region", { status: 403 });

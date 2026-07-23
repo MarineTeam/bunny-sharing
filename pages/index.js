@@ -34,6 +34,9 @@ export default function Admin() {
   // Admin-surface geo whitelist: same pattern, sourced from ADMIN_GEO_WHITELIST.
   const [adminGeoEnabled, setAdminGeoEnabled] = useState(false);
   const [adminGeoCountries, setAdminGeoCountries] = useState([]);
+  // Read-only, sourced from ADMIN_GEO_BYPASS_EMAILS — usernames that always
+  // skip the admin geo check, regardless of country or the toggle above.
+  const [adminGeoBypassEmails, setAdminGeoBypassEmails] = useState([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
@@ -78,6 +81,7 @@ export default function Admin() {
     setGeoCountries(s.geoWhitelistCountries || []);
     setAdminGeoEnabled(!!s.adminGeoWhitelistEnabled);
     setAdminGeoCountries(s.adminGeoWhitelistCountries || []);
+    setAdminGeoBypassEmails(s.adminGeoBypassEmails || []);
   }
 
   // Current per-video override as a select value: "on" / "off" / "default".
@@ -472,6 +476,20 @@ export default function Admin() {
             />{" "}
             Enforce the admin geo whitelist
           </label>
+          <p style={styles.hint}>
+            Standing bypass: a Basic Auth username listed in the{" "}
+            <code>ADMIN_GEO_BYPASS_EMAILS</code> environment variable always
+            skips this check, regardless of country or the toggle above.
+            Also env-var-only, not editable here — arm it{" "}
+            <strong>before</strong> traveling, since env var changes need a
+            redeploy and this is a standing safety net, not an
+            in-the-moment fix.
+            {adminGeoBypassEmails.length > 0 ? (
+              <> Currently configured: <strong>{adminGeoBypassEmails.join(", ")}</strong>.</>
+            ) : (
+              <> Not currently configured.</>
+            )}
+          </p>
 
           <button onClick={saveSettings} disabled={savingSettings} style={styles.btn}>
             {savingSettings ? "Saving..." : "Save settings"}
