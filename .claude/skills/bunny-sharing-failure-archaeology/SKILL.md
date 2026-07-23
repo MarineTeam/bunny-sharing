@@ -376,7 +376,7 @@ each is owned by a sibling skill.
 | Gate unproven live | The email gate (Episode 7) has never been exercised against live Resend + a real inbox + prod Bunny/KV. It is built, not proven. | OPEN — the hardest live problem | bunny-sharing-email-gate-campaign |
 | Magic-link grant not single-use | A grant is replayable within its 15-min TTL if intercepted (mitigated: cookie exchange + redirect strips it from the URL). | OPEN / hardening CANDIDATE | bunny-sharing-email-gate-campaign (hardening menu), bunny-sharing-roadmap |
 | No per-IP rate limiting | Throttle on request-link is per-share-token only (30 s); nothing limits one IP hammering many tokens. | OPEN | bunny-sharing-roadmap |
-| KV `KEYS` is O(N) | `kvKeys` (lib/kv.js) uses Redis KEYS; shares list and cleanup scan everything. Fine at current scale; will not scale. | OPEN (accepted for now) | bunny-sharing-roadmap |
+| ~~KV `KEYS` is O(N)~~ | Fixed 2026-07-22 — index sets + SMEMBERS replace every hot-path KEYS scan; see roadmap item (a). | SETTLED | bunny-sharing-roadmap |
 | Plaintext Basic Auth compare | middleware.js compares `ADMIN_USER`/`ADMIN_PASS` env strings directly; single shared credential; no timing-safe compare. | OPEN | bunny-sharing-roadmap |
 | Record stored before email sent | share/share-bulk write the KV record, then email; a send failure leaves a live record with no delivered link. | OPEN | bunny-sharing-roadmap |
 

@@ -80,6 +80,7 @@ See [FEATURES.md](./FEATURES.md) for the full feature list and [CHANGELOG.md](./
 | `/api/share/extend` | POST | Extend a share's expiry in place (`{token, hours}`) — same link, longer validity. Works on an already-expired (not revoked) share. Refuses revoked shares. |
 | `/api/share/extend-bulk` | POST | Extend multiple shares in one call; reports success/failure per token |
 | `/api/cleanup` | POST | Delete expired or revoked share and bundle records |
+| `/api/backfill-index` | POST | One-time migration: populates the share/bundle index sets from a full scan, for records that existed before the index did. Idempotent — safe to re-run. Also in the admin UI as "🔁 Rebuild index". |
 | `/api/watch/request-link` | POST | Public: verify a recipient's email against a share and email them a one-time magic link (excluded from admin Basic Auth) |
 | `/api/watch/track` | POST | Public: record playback events (play/progress/ended) reported by the player; requires a token-bound tracking grant issued by the authorized watch page |
 | `/api/bundle/request-link` | POST | Public: verify a recipient's email against their bundle and email them a one-time magic link that unlocks every video in it |
@@ -89,3 +90,5 @@ See [FEATURES.md](./FEATURES.md) for the full feature list and [CHANGELOG.md](./
 ## Deployment
 
 Deploys as a standard Next.js app (e.g. on Vercel). Set the environment variables above in your hosting provider, and optionally schedule `/api/cleanup` (e.g. a Vercel Cron job) to periodically purge stale share records.
+
+If you're upgrading an existing deployment that already has share/bundle records in Redis, click **🔁 Rebuild index** in the admin table once after deploying (or `POST /api/backfill-index`) — the admin listing and cleanup now read an index instead of scanning the whole keyspace, so pre-existing records need to be indexed once to keep showing up. Not needed on a fresh deployment. Existing `/watch`/`/bundle` links are unaffected either way — they never depended on the index.

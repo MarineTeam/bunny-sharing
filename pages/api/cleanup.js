@@ -1,23 +1,44 @@
-import { kvKeys, kvGet, kvDel } from "../../lib/kv";
+import { kvGet, kvDel, kvSrem, kvSmembers } from "../../lib/kv";
+import { SHARE_INDEX_KEY } from "../../lib/shares";
+import { BUNDLE_INDEX_KEY } from "../../lib/bundles";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).end();
   try {
-    const shareKeys = await kvKeys("bunnyshare:*");
-    const shareRecords = await Promise.all(shareKeys.map((k) => kvGet(k)));
-    const shareToDelete = shareRecords
-      .map((r, i) => ({ record: r, key: shareKeys[i] }))
-      .filter(({ record }) => record && (record.revoked || Date.now() > record.expiresAt));
+    // Reads both index sets (SMEMBERS) rather than KEYS-scanning the whole
+    // keyspace — see pages/api/backfill-index.js if a store had records
+    // before either index existed.
+    const shareTokens = await kvSmembers(SHARE_INDEX_KEY);
+    const shareRecords = await Promise.all(shareTokens.map((t) => kvGet(`bunnyshare:${t}`)));
+    const shareEntries = shareTokens.map((token, i) => ({ token, record: shareRecords[i] }));
+    const shareToDelete = shareEntries.filter(
+      ({ record }) => record && (record.revoked || Date.now() > record.expiresAt)
+    );
+    // Self-heal: a token present in the index whose record is already gone
+    // (e.g. an interrupted delete elsewhere) — drop it from the index too,
+    // so it stops costing a wasted GET on every future listing/cleanup.
+    const shareIndexOrphans = shareEntries.filter(({ record }) => !record);
 
     // Bundle records (lib/bundles.js) have no revoked flag of their own —
     // they're a grouping list, not a share; only expiry retires them here.
-    const bundleKeys = await kvKeys("bunnybundle:*");
-    const bundleRecords = await Promise.all(bundleKeys.map((k) => kvGet(k)));
-    const bundleToDelete = bundleRecords
-      .map((r, i) => ({ record: r, key: bundleKeys[i] }))
-      .filter(({ record }) => record && Date.now() > record.expiresAt);
+    const bundleIds = await kvSmembers(BUNDLE_INDEX_KEY);
+    const bundleRecords = await Promise.all(bundleIds.map((id) => kvGet(`bunnybundle:${id}`)));
+    const bundleEntries = bundleIds.map((id, i) => ({ id, record: bundleRecords[i] }));
+    const bundleToDelete = bundleEntries.filter(
+      ({ record }) => record && Date.now() > record.expiresAt
+    );
+    const bundleIndexOrphans = bundleEntries.filter(({ record }) => !record);
 
-    await Promise.all([...shareToDelete, ...bundleToDelete].map(({ key }) => kvDel(key)));
+    await Promise.all([
+      ...shareToDelete.map(({ token }) =>
+        Promise.all([kvDel(`bunnyshare:${token}`), kvSrem(SHARE_INDEX_KEY, token)])
+      ),
+      ...bundleToDelete.map(({ id }) =>
+        Promise.all([kvDel(`bunnybundle:${id}`), kvSrem(BUNDLE_INDEX_KEY, id)])
+      ),
+      ...shareIndexOrphans.map(({ token }) => kvSrem(SHARE_INDEX_KEY, token)),
+      ...bundleIndexOrphans.map(({ id }) => kvSrem(BUNDLE_INDEX_KEY, id)),
+    ]);
 
     res.status(200).json({ deleted: shareToDelete.length + bundleToDelete.length });
   } catch (err) {

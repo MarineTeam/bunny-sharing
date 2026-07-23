@@ -225,6 +225,22 @@ export default function Admin() {
     }
   }
 
+  // One-time (idempotent, safe to re-run) migration: populates the share/
+  // bundle index sets from a full scan, so records that existed before the
+  // index did still show up in this table. Normally a no-op once run.
+  async function backfillIndex() {
+    if (!confirm("Rebuild the share/bundle index from a full scan? Only needed once, or if the list ever looks incomplete.")) return;
+    setMessage("Rebuilding index...");
+    const res = await fetch("/api/backfill-index", { method: "POST" });
+    const data = await res.json();
+    if (data.ok) {
+      setMessage(`Indexed ${data.indexedShares} share${data.indexedShares !== 1 ? "s" : ""} and ${data.indexedBundles} bundle${data.indexedBundles !== 1 ? "s" : ""}`);
+      loadAll();
+    } else {
+      setMessage(`Error: ${data.error}`);
+    }
+  }
+
   async function revoke(token) {
     if (!confirm("Revoke this access link?")) return;
     await fetch("/api/revoke", {
@@ -663,6 +679,9 @@ export default function Admin() {
         <h2 style={{ margin: 0 }}>Shared Links</h2>
         <button onClick={cleanup} className="btn btn-muted">
           🗑 Clean up expired &amp; revoked
+        </button>
+        <button onClick={backfillIndex} className="btn btn-muted" title="One-time migration: only needed once, or if the list ever looks incomplete">
+          🔁 Rebuild index
         </button>
       </div>
 

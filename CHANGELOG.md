@@ -18,6 +18,35 @@ Five version tags mark points release notes were cut from this history:
 
 ## 2026-07-22 (post-v1.4.0)
 
+### Changed
+- **Replaced KEYS scans with index sets.** The admin shares listing, bundle
+  lookups, and cleanup used to scan the ENTIRE Redis keyspace with `KEYS
+  bunnyshare:*`/`KEYS bunnybundle:*` on every load — expensive and blocking
+  as the store grows, and not scoped to just this app's keys. Two new
+  Redis SETs, `bunnyshare-index` and `bunnybundle-index`
+  (`lib/shares.js`/`lib/bundles.js`), are now maintained alongside every
+  create/delete (best-effort SADD on create — never blocks share/bundle
+  creation if it fails; SREM on delete, in `revoke-permanent.js` and
+  `cleanup.js`) and read via `SMEMBERS` instead. Every KEYS-scanning call
+  site was updated: `/api/shares`, `/api/cleanup`, and three functions in
+  `lib/bundles.js` (`findOrExtendBundle`'s orphan sweep,
+  `bundleLinksForTokens`, `extendBundleForToken`) — the last three matter
+  more than the admin listing itself, since `findOrExtendBundle` runs on
+  every single `/api/share`/`/api/share-bulk` call, not just page loads.
+  New one-time migration endpoint `/api/backfill-index` (idempotent, also
+  in the admin UI as "🔁 Rebuild index") populates both indexes from a
+  real scan for records that existed before the index did — required once
+  after upgrading an existing deployment; not needed on a fresh one.
+  Cleanup also now self-heals any orphaned index entries (a token/id
+  present in the index whose record is already gone) it happens to notice.
+  Verified live against a mock Upstash REST server: created shares, listed
+  them via the new index path, permanently deleted one and confirmed its
+  index entry was removed, injected a raw "pre-existing" record bypassing
+  the index and confirmed it was invisible until `/api/backfill-index` was
+  run (then present, and idempotent on a second run), and confirmed
+  cleanup both deletes real expired records and silently drops an injected
+  orphan index entry without miscounting it as deleted.
+
 ### Added
 - **Admin geo bypass list.** `ADMIN_GEO_BYPASS_EMAILS` lists Basic Auth
   usernames (case-insensitive) that always skip the admin geo check,

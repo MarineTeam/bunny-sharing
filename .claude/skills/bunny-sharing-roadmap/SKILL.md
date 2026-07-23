@@ -54,20 +54,64 @@ open and tracked as the campaign. That full arc is the template.
 Each entry: why insufficient / the asset we have / first three steps in this
 repo / "you have a result when…". All are CANDIDATES — none is scheduled work.
 
-### (a) Replace KEYS scans (lib/kv.js)
-- **Why:** `kvKeys("bunnyshare:*")` uses Redis KEYS — O(N) over the whole
-  keyspace on every admin page load and cleanup run. Fine at ~dozens of
-  shares; degrades silently as records grow.
-- **Asset:** all writes already funnel through `createShareRecord`
-  (lib/shares.js) — one choke point to maintain an index.
-- **First steps:** (1) add an index set (SADD `bunnyshare-index` on create;
-  SREM on cleanup) via new lib/kv.js helpers; (2) switch pages/api/shares.js
-  and cleanup.js to read the index with per-token GETs; (3) one-off backfill
-  script that KEYS-scans once and populates the index (old records must keep
-  working — lifecycle rule 4).
-- **Result when:** with 1,000 seeded records, /api/shares returns correctly
-  and no KEYS command is issued (verify via Upstash console/monitor), and
-  pre-existing records created before the change still appear.
+### (a) Replace KEYS scans (lib/kv.js) — ADOPTED 2026-07-22
+- **Was:** `kvKeys("bunnyshare:*")`/`kvKeys("bunnybundle:*")` used Redis
+  KEYS — O(N) over the WHOLE keyspace, not just this app's keys — on every
+  admin page load, every `/api/share`/`/api/share-bulk` call (via
+  `findOrExtendBundle`'s orphan sweep), every bundle-link lookup, every
+  extend-a-share call (via `extendBundleForToken`), and every cleanup run.
+  Prompted directly by a user question: "how many upstash commands would
+  1000 shares be when loading shares page" — answer was ~1,002+B (1 KEYS +
+  1000 GETs + 1 KEYS + B bundle GETs), which made the O(N) cost concrete
+  enough to fix on the spot.
+- **What shipped:** two new Redis SETs, `bunnyshare-index`
+  (`lib/shares.js`) and `bunnybundle-index` (`lib/bundles.js`), exported as
+  constants so every call site shares the same key. New `kvSadd`/`kvSrem`/
+  `kvSmembers` helpers in `lib/kv.js`. `createShareRecord` and
+  `createBundleRecord` SADD the new token/id into the index — wrapped in
+  try/catch, deliberately best-effort: an index-write failure logs
+  server-side but never blocks share/bundle creation, which has already
+  succeeded by that point (worst case is a temporarily-invisible-in-admin
+  share, never a broken link — the never-break-live-links rule is about
+  links, and `/watch/<token>`/`/bundle/<id>` never read the index at all,
+  only `kvGet` the record directly). EVERY KEYS-scanning call site was
+  converted to SMEMBERS + per-key GET: `pages/api/shares.js`,
+  `pages/api/cleanup.js` (both indexes, plus SREM on every deleted
+  record), `pages/api/revoke-permanent.js` (SREM on delete), and three
+  functions in `lib/bundles.js` — `findOrExtendBundle` (its orphan sweep
+  over `bunnyshare:*`, the hottest of all these paths since it runs on
+  every single share/bulk-share call, not just page loads),
+  `bundleLinksForTokens`, and `extendBundleForToken`. `pages/api/cleanup.js`
+  also now self-heals: any index entry whose record is already gone (e.g.
+  from an interrupted delete elsewhere) gets SREM'd during the same run,
+  without being miscounted as a real deletion.
+  New one-time migration endpoint `pages/api/backfill-index.js` — the ONE
+  remaining place that still does a real KEYS scan, on purpose, to seed
+  both indexes from records that existed before the index did (idempotent:
+  SADD naturally dedupes, safe to re-run). Surfaced in the admin UI next to
+  Cleanup as "🔁 Rebuild index". Required once after upgrading an existing
+  deployment with pre-existing records; a no-op on a fresh one.
+- **Verified:** L0 (`npm run build` clean, `/api/backfill-index`
+  registered) + a live L2/L3 pass against a mock Upstash REST server (not
+  committed, throwaway): created 3 shares via `/api/share` → all 3 appeared
+  in `/api/shares` via the new SMEMBERS-based listing, each with a correct
+  per-recipient bundle link; permanently deleted one → confirmed its token
+  was SREM'd from `bunnyshare-index` and it dropped out of the listing;
+  injected a raw `bunnyshare:<token>` record directly into the mock store
+  (bypassing SADD, simulating a pre-existing record from before this
+  change) → confirmed it was invisible to `/api/shares` until
+  `/api/backfill-index` was run, then present, and a second backfill run
+  was idempotent (same 3-entry index, no duplicates/errors); expired that
+  same record and injected an unrelated orphan index entry with no backing
+  record → ran `/api/cleanup` → confirmed it reported `deleted: 1` (only
+  the genuinely expired record) while the orphan silently vanished from
+  the index without being counted.
+- **Not yet exercised:** production deploy; performance at the actual
+  1,000-share scale the original question was about (the mock KV test used
+  a handful of records to verify correctness, not load) — SMEMBERS itself
+  is O(N) in the SIZE OF THE INDEX (not the whole keyspace), which is the
+  intended improvement, but this wasn't independently re-benchmarked
+  against a large synthetic index.
 
 ### (b) Per-IP rate limiting on /api/watch/request-link
 - Owned by the campaign's hardening menu item 2 — see
@@ -532,7 +576,9 @@ over inventing features.
 
 Written 2026-07-18 against branch claude/bulk-share-separate-links-auth-cblrle.
 
-- (a) still true: `grep -n "keys/" lib/kv.js` and `grep -n "kvKeys" pages/api/shares.js pages/api/cleanup.js`
+- (a) still adopted: `grep -rln "kvKeys" pages lib` should show ONLY
+  `pages/api/backfill-index.js` (plus `lib/kv.js`'s own definition) —
+  anything else means a KEYS scan crept back into a hot path
 - (d) still true: `grep -n "u === user" middleware.js` (plain compare present)
 - (e) still true: `grep -n "itemsPerPage" lib/bunny.js` (=100, no page param)
 - (f) still true: `grep -n -A3 "createShareRecord" pages/api/share.js` (record write precedes sendShareEmail)

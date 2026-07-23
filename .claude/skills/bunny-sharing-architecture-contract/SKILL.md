@@ -247,12 +247,14 @@ suggestions; they are the reasons the system is safe and simple.
   member's status (instead of re-reading `bunnyshare:<token>`) reintroduces
   the second-source-of-truth risk this design deliberately avoids. Any code
   path that reads `bundle.tokens` and does NOT re-fetch each `bunnyshare:`
-  record before showing title/status is wrong. `findOrExtendBundle` does a
-  full `KEYS bunnybundle:*` AND `KEYS bunnyshare:*` scan on every call where
-  no active bundle is found yet for that email (the orphan sweep) — extends
-  the KEYS-scan performance profile (roadmap item a) to `/api/share.js` too,
-  not just admin listing/cleanup; accepted at current scale, revisit
-  together. Also note: if a recipient already unlocked a bundle (has a valid
+  record before showing title/status is wrong. `findOrExtendBundle` reads
+  both index sets (`SMEMBERS bunnybundle-index`/`bunnyshare-index`, not a
+  `KEYS` scan as of 2026-07-22 — see roadmap item a) on every call where no
+  active bundle is found yet for that email (the orphan sweep) — this is
+  the hottest of the former KEYS-scan call sites, running on every single
+  `/api/share`/`/api/share-bulk` call, which is exactly why it was included
+  in that fix rather than left for later. Also note: if a recipient already
+  unlocked a bundle (has a valid
   `gate_bundle_<id>` cookie) and a NEW share is later folded into that same
   bundle, the new video appears in the listing immediately but has no
   per-video `gate_<token>` cookie yet — no per-video cookies are minted
@@ -380,7 +382,7 @@ scope decisions or unfinished hardening. "Candidate-fix" items live in
 | Weak point | Severity | Status |
 |------------|----------|--------|
 | Basic Auth compares plaintext env strings with `===` (`middleware.js:18`); single shared admin credential; no timing-safe compare | Medium (admin surface; attacker needs network position or many guesses) | Accepted-for-now; candidate-fix in bunny-sharing-roadmap |
-| `kvKeys` uses Redis `KEYS` — O(N) full scan (`lib/kv.js:40-43`); `/api/shares` and `/api/cleanup` scan everything | Low at current scale (tens of shares); Medium if shares grow unbounded | Accepted-for-now; revisit at scale (bunny-sharing-roadmap) |
+| ~~`kvKeys` uses Redis `KEYS` — O(N) full scan~~ FIXED 2026-07-22: `bunnyshare-index`/`bunnybundle-index` SETs + `SMEMBERS` replace it everywhere except the one-time `/api/backfill-index` migration | N/A | Adopted (bunny-sharing-roadmap item a) |
 | Magic-link grant is NOT single-use within its 15-min TTL — replayable if intercepted. Mitigated: cookie exchange + redirect strips it from URL/history | Medium | Candidate-fix (top hardening item in bunny-sharing-email-gate-campaign) |
 | Throttle is 30 s per share token only (`gatethrottle:<token>`); no per-IP rate limiting on `/api/watch/request-link` | Low-Medium (email-bombing across many tokens, or KV load) | Candidate-fix (bunny-sharing-roadmap) |
 | No tests, no linter, no CI (two scanners were added, then deleted — see bunny-sharing-failure-archaeology). Verification is manual | Medium (process risk, not runtime risk) | Candidate-fix (bunny-sharing-validation-and-qa) |

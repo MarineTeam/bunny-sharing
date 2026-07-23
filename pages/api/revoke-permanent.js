@@ -1,4 +1,5 @@
-import { kvGet, kvDel } from "../../lib/kv";
+import { kvGet, kvDel, kvSrem } from "../../lib/kv";
+import { SHARE_INDEX_KEY } from "../../lib/shares";
 
 // Admin-only (covered by the default middleware matcher). Irreversibly
 // deletes a share record — unlike Revoke (a reversible flag flip; see
@@ -20,6 +21,7 @@ export async function permanentlyDeleteOne(token) {
     return { token, ok: false, error: "Only a revoked share can be permanently deleted" };
   }
   await kvDel(`bunnyshare:${token}`);
+  await kvSrem(SHARE_INDEX_KEY, token);
   return { token, ok: true };
 }
 
