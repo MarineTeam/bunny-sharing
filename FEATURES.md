@@ -37,6 +37,14 @@ every page load, regardless of the bundle unlock — revoking one video is
 reflected instantly on the bundle page too, without touching the bundle
 record itself.
 
+A bundle has no revoked flag of its own — it retires when `/api/cleanup`
+runs and either its own expiry has passed, or every member it lists has
+gone dead (revoked, expired, or deleted). The second condition matters
+because a bundle's own expiry only ever grows (it tracks the latest of
+every member ever added, via Extend), so without it, revoking or
+permanently deleting every video in a bundle would leave a fully
+live, gate-able bundle page behind with nothing left to show.
+
 Every share belonging to a bundle also shows a persistent "bundle page" link
 right in the admin table (under its `/watch/<token>` link), not just in the
 one-time success message shown right after sharing — so the link is easy to

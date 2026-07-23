@@ -18,6 +18,21 @@ Five version tags mark points release notes were cut from this history:
 
 ## 2026-07-22 (post-v1.4.0)
 
+### Fixed
+- **Stale bundles.** `/api/cleanup` used to retire a bundle only once its
+  own `expiresAt` passed — but a bundle has no `revoked` flag, and its
+  `expiresAt` tracks the MAX of every member ever added (only growing, via
+  Extend), so revoking or permanently deleting every video in a bundle
+  left a fully live, gate-able bundle record behind with nothing left to
+  show, potentially for a long time. Cleanup now also retires a bundle the
+  moment none of its listed members are live (revoked, expired, or
+  deleted) anymore, regardless of the bundle's own expiry. Verified live
+  against a mock KV store: bulk-shared 2 videos into one bundle with a
+  ~1-year expiry, revoked and permanently deleted both members, confirmed
+  the bundle record was untouched by that alone, then ran cleanup and
+  confirmed it was removed (from KV and its index) despite being nowhere
+  near its own expiry.
+
 ### Changed
 - **Replaced KEYS scans with index sets.** The admin shares listing, bundle
   lookups, and cleanup used to scan the ENTIRE Redis keyspace with `KEYS

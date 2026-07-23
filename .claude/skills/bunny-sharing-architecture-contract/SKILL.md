@@ -459,7 +459,7 @@ however many separate calls touch that email, not one bundle per call.
 | `email` | string | The one recipient this bundle belongs to, as first typed (not normalized) — `findOrExtendBundle` matches with `normalizeEmail` for lookup, but never rewrites this field on an existing bundle |
 | `tokens` | array of string | The member share tokens (`bunnyshare:<token>` keys); grows via `findOrExtendBundle` as more shares are created for this email; never shrinks (a revoked/expired member stays listed, just filtered out live by `getBundleMembers`/`getBundleItems`) |
 | `createdAt` | number | Unix epoch milliseconds — set once, at first creation, never updated on extend |
-| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` at creation; re-maxed whenever `findOrExtendBundle` adds new members (section 2.6), AND whenever `extendBundleForToken` (section 2.8a) is called after a single member's own `expiresAt` grows via `/api/share/extend` — two different call sites, same one-way-grows-only rule — the bundle listing itself is considered expired once every member would be, individually |
+| `expiresAt` | number | `Math.max(...members.map(m => m.expiresAt))` at creation; re-maxed whenever `findOrExtendBundle` adds new members (section 2.6), AND whenever `extendBundleForToken` (section 2.8a) is called after a single member's own `expiresAt` grows via `/api/share/extend` — two different call sites, same one-way-grows-only rule, ONLY EVER GROWS. Since it's a max, NOT every member is individually expired when `Date.now()` finally passes it — most will have expired earlier. This is why `expiresAt` alone is an insufficient retirement signal (see the `pages/api/cleanup.js` note two paragraphs down). |
 
 Deliberately absent: `videoTitle`, `revoked`, any per-member status. A
 bundle is a grouping list, not a share — `getBundleMembers` (`lib/bundles.js`)
@@ -470,9 +470,14 @@ member record already owns.
 Auxiliary key: `bundlethrottle:<bundleId>` — same shape and purpose as
 `gatethrottle:<token>` but for `/api/bundle/request-link.js`. Ephemeral.
 
-`pages/api/cleanup.js` deletes `bunnybundle:*` records once
-`Date.now() > record.expiresAt` (no `revoked` check — bundles have no such
-flag); this is the only code path that deletes them.
+`pages/api/cleanup.js` deletes `bunnybundle:*` records once EITHER
+`Date.now() > record.expiresAt` OR none of `record.tokens` currently
+resolves to a live (existing, unrevoked, unexpired) `bunnyshare:<token>`
+record (added 2026-07-22, fixing a "stale bundle" gap: since `expiresAt`
+only grows and has no `revoked` check of its own, revoking/permanently-
+deleting every member left a fully live, gate-able bundle behind with
+nothing left to show it, sometimes for a long time). This is the only code
+path that deletes bundle records.
 
 ### 5.1b Settings record — KV key `bunnysettings:global` (added post-1.1.0)
 

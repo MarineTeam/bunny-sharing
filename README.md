@@ -79,7 +79,7 @@ See [FEATURES.md](./FEATURES.md) for the full feature list and [CHANGELOG.md](./
 | `/api/share/resend-bulk` | POST | Resend for multiple shares in one call; reports success/failure per token |
 | `/api/share/extend` | POST | Extend a share's expiry in place (`{token, hours}`) — same link, longer validity. Works on an already-expired (not revoked) share. Refuses revoked shares. |
 | `/api/share/extend-bulk` | POST | Extend multiple shares in one call; reports success/failure per token |
-| `/api/cleanup` | POST | Delete expired or revoked share and bundle records |
+| `/api/cleanup` | POST | Delete expired or revoked share records, and bundle records that are either expired or have no live members left |
 | `/api/backfill-index` | POST | One-time migration: populates the share/bundle index sets from a full scan, for records that existed before the index did. Idempotent — safe to re-run. Also in the admin UI as "🔁 Rebuild index". |
 | `/api/watch/request-link` | POST | Public: verify a recipient's email against a share and email them a one-time magic link (excluded from admin Basic Auth) |
 | `/api/watch/track` | POST | Public: record playback events (play/progress/ended) reported by the player; requires a token-bound tracking grant issued by the authorized watch page |

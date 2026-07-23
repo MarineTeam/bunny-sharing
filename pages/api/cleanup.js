@@ -20,13 +20,31 @@ export default async function handler(req, res) {
     const shareIndexOrphans = shareEntries.filter(({ record }) => !record);
 
     // Bundle records (lib/bundles.js) have no revoked flag of their own —
-    // they're a grouping list, not a share; only expiry retires them here.
+    // they're a grouping list, not a share — so a bundle retires when
+    // EITHER its own expiresAt passes OR every member it lists has gone
+    // dead (revoked, expired, or its bunnyshare: record deleted entirely),
+    // whichever comes first. Without the second condition, revoking (or
+    // permanently deleting) every video in a bundle leaves a fully live,
+    // gate-able bundle record behind — its own expiresAt tracks the MAX of
+    // every member ever added (and only grows via Extend), so it can
+    // linger long after it has nothing left to show. Uses the
+    // already-computed shareEntries above (this run's live/dead
+    // determination), not a fresh lookup.
+    const liveShareTokens = new Set(
+      shareEntries
+        .filter(({ record }) => record && !record.revoked && Date.now() < record.expiresAt)
+        .map(({ token }) => token)
+    );
+
     const bundleIds = await kvSmembers(BUNDLE_INDEX_KEY);
     const bundleRecords = await Promise.all(bundleIds.map((id) => kvGet(`bunnybundle:${id}`)));
     const bundleEntries = bundleIds.map((id, i) => ({ id, record: bundleRecords[i] }));
-    const bundleToDelete = bundleEntries.filter(
-      ({ record }) => record && Date.now() > record.expiresAt
-    );
+    const bundleToDelete = bundleEntries.filter(({ record }) => {
+      if (!record) return false;
+      const expired = Date.now() > record.expiresAt;
+      const allMembersDead = record.tokens.every((t) => !liveShareTokens.has(t));
+      return expired || allMembersDead;
+    });
     const bundleIndexOrphans = bundleEntries.filter(({ record }) => !record);
 
     await Promise.all([
